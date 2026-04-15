@@ -70,6 +70,7 @@ docker exec -it multiagent-postgres psql -U postgres -d dvdrental
 Work is **spec-driven**: requirements live in specs (e.g. `TASK.md`, feature specs, or `SPEC-*.md`), and implementation follows them deliberately.
 
 - **One spec ≈ one feature ≈ one branch** (see [Git conventions](#git-conventions-must-follow)). The branch should land in a **functional** state: the app builds, core flows run, and nothing is left half-wired in a way that breaks `main`-level expectations after merge.
+- **Never rewrite a previous spec**: when adding or updating requirements, do not replace or overwrite an existing spec file in full. Add a new spec for new scope, or make **targeted, additive** edits to the spec you are working on; preserve prior spec documents as the historical record unless the user explicitly asks to revise or replace a specific file.
 - **Multi-step specs**: after every step, the codebase should still be **functional**—no “big bang” integration at the end. Prefer small, verifiable increments.
 - **Testing**: treat automated tests as a first-class deliverable; run the project’s test suite (plus [smoke checks](#how-to-verify-changes-minimum)) before considering work complete.
 
