@@ -12,6 +12,9 @@ wheels/
 # Ruff
 .ruff_cache/
 
+# .env files
+.env
+
 # Local guidance
 SPEC-HINT.md
 EXAMPLES/
