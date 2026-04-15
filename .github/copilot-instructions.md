@@ -19,19 +19,19 @@
 
 ## PR review — check first (highest priority)
 
-1. **SQL execution safety (non-negotiable)**  
+1. **SQL execution safety (non-negotiable)**
    Only **read-only** SQL on the execution path. Reject or guard against: `INSERT`, `UPDATE`, `DELETE`, `TRUNCATE`, `DROP`, `ALTER`, `CREATE`, `GRANT`, `REVOKE`, `VACUUM`, `ANALYZE`, `COPY`, `DO`, `CALL`, `EXECUTE`. Prefer **`LIMIT`** on exploratory/preview queries.
 
-2. **Two-agent separation**  
+2. **Two-agent separation**
    Changes should not blur Schema vs Query responsibilities (distinct prompts, tools, nodes).
 
-3. **Human-in-the-loop**  
+3. **Human-in-the-loop**
    Schema descriptions must not be persisted without an explicit **approval** path.
 
-4. **Traceability**  
+4. **Traceability**
    New behavior should log **graph transitions**, **tool calls**, **validation/critic** steps, and **HITL** where relevant.
 
-5. **Dataset**  
+5. **Dataset**
    Core flows and demos must stay on **DVD Rental**; do not replace it as the primary dataset.
 
 ---

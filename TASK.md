@@ -113,10 +113,10 @@ Your system must:
 - Reproducible setup.
 - Robust error handling (bad SQL, empty results, schema mismatch, ambiguous intent).
 - Basic observability/logging for:
-- graph node transitions,
-- tool calls,
-- retry/fallback behavior,
-- human-in-the-loop interactions.
+  - graph node transitions,
+  - tool calls,
+  - retry/fallback behavior,
+  - human-in-the-loop interactions.
 
 ### Constraints
 
