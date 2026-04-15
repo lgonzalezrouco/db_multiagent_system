@@ -1,6 +1,8 @@
 import pytest
+from pydantic import ValidationError
 
 from config import Settings
+from db_multiagent_system.bootstrap import run
 
 
 def test_settings_reads_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -19,9 +21,12 @@ def test_settings_reads_env_vars(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.mark.integration
 def test_run_live_postgres() -> None:
-    from db_multiagent_system.bootstrap import run
+    try:
+        Settings()
+    except ValidationError:
+        pytest.skip("Postgres settings missing/invalid (.env not found?)")
 
     code = run()
     if code != 0:
-        pytest.skip("Postgres unreachable (see README: docker compose, .env)")
+        pytest.skip("Postgres unreachable (is docker-compose up running?)")
     assert code == 0

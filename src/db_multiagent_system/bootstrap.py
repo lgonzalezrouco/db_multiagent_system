@@ -2,6 +2,7 @@ import logging
 
 import psycopg
 from psycopg import OperationalError
+from pydantic import ValidationError
 
 from config import Settings
 
@@ -9,13 +10,19 @@ logger = logging.getLogger(__name__)
 
 
 def run() -> int:
-    settings = Settings()
+    try:
+        settings = Settings()
+    except ValidationError as exc:
+        logger.error("Configuration error: %s", exc)
+        return 1
+
     conninfo = psycopg.conninfo.make_conninfo(
         host=settings.postgres_host,
         port=settings.postgres_port,
         user=settings.postgres_user,
         password=settings.postgres_password,
         dbname=settings.postgres_db,
+        connect_timeout=5,
     )
     try:
         with (
