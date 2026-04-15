@@ -3,7 +3,7 @@ services:
     image: postgres:18
     container_name: multiagent-postgres
     environment:
-      POSTGRES_DB: db-multiagent-system
+      POSTGRES_DB: dvdrental
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: mysecretpassword
     ports:
@@ -13,7 +13,7 @@ services:
       - ./db/restore-dvdrental.sh:/docker-entrypoint-initdb.d/10-restore-dvdrental.sh:ro
       - ./db/dvdrental.tar:/docker-entrypoint-initdb.d/dvdrental.tar:ro
     healthcheck:
-      test: [ "CMD-SHELL", "pg_isready -U postgres -d db-multiagent-system" ]
+      test: [ "CMD-SHELL", "pg_isready -U postgres -d dvdrental" ]
       interval: 10s
       timeout: 5s
       retries: 5
