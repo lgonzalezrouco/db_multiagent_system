@@ -2,20 +2,23 @@
 
 This file defines **project-specific instructions** for AI coding agents working in this repository.
 
-## Project goal (what you’re building)
+**Requirements source of truth:** `TASK.md` (two LangGraph agents, memory, MCP tools, patterns, observability, dataset, suggested layout, deliverables, rubric). This file only adds **repo workflow**, **how to run things here**, and **rules agents must not miss**.
 
-Build a **two-agent LangGraph** system over PostgreSQL (DVD Rental dataset):
+## Project goal (summary)
 
-- **Schema Agent**: inspects schema metadata, drafts table/column descriptions, runs a **human-in-the-loop** checkpoint, then persists approved descriptions.
-- **Query Agent**: converts natural language questions to **safe, read-only SQL**, executes it, returns **SQL + sample rows + explanation**, and supports iterative refinement.
-
-See `TASK.md` for full grading requirements and deliverables.
+Build a **Schema Agent** and a **Query Agent** over PostgreSQL using the **DVD Rental** dataset, with safe read-only execution and human approval before persisting schema docs. Details: `TASK.md`.
 
 ## Repo state (current)
 
 - `README.md` is currently empty.
 - `main.py` is a placeholder.
 - `docker-compose.yml` starts Postgres and loads the DVD Rental dataset into a `dvdrental` database via `db/restore-dvdrental.sh`.
+- **Python tooling:** this repo uses **[uv](https://github.com/astral-sh/uv)** for environments and dependencies (`pyproject.toml`, `uv.lock`).
+
+### Dependencies (must follow)
+
+- **Do not add or edit dependency entries by hand** in `pyproject.toml` or `uv.lock`. Use **`uv add <package>`** for runtime deps and **`uv add --dev <package>`** for dev-only tools so versions and the lockfile stay consistent.
+- If you cannot run `uv` in this environment (e.g. no network or `uv` missing), **tell the user exactly which `uv add` command to run** instead of pasting manual dependency lines.
 
 ## Local setup (expected workflow)
 
@@ -62,20 +65,13 @@ docker exec -it multiagent-postgres psql -U postgres -d dvdrental
 - Before persisting schema descriptions, **require explicit user approval**.
 - If descriptions are ambiguous, ask targeted questions and present a short proposed description for approval.
 
-## Implementation conventions (to keep the project gradeable)
+## Spec-driven design
 
-- **Keep the two-agent separation crisp**: different prompts, responsibilities, tools, and graph nodes.
-- **Traceability/observability is required**:
-  - log graph node transitions and tool calls
-  - log validation/critic steps
-  - log human-in-the-loop interactions
-- **Memory**:
-  - implement **persistent memory** (user preferences across sessions)
-  - implement **short-term memory** (conversation context)
-  - document what’s stored and why
-- **MCP tools**:
-  - implement tools for schema inspection and SQL execution (read-only)
-  - ensure tool usage is integrated into the LangGraph workflow and visible in logs
+Work is **spec-driven**: requirements live in specs (e.g. `TASK.md`, feature specs, or `SPEC-*.md`), and implementation follows them deliberately.
+
+- **One spec ≈ one feature ≈ one branch** (see [Git conventions](#git-conventions-must-follow)). The branch should land in a **functional** state: the app builds, core flows run, and nothing is left half-wired in a way that breaks `main`-level expectations after merge.
+- **Multi-step specs**: after every step, the codebase should still be **functional**—no “big bang” integration at the end. Prefer small, verifiable increments.
+- **Testing**: treat automated tests as a first-class deliverable; run the project’s test suite (plus [smoke checks](#how-to-verify-changes-minimum)) before considering work complete.
 
 ## Git conventions (must follow)
 
@@ -96,6 +92,7 @@ Use **GitHub Flow**:
 - `main` stays deployable/working.
 - Work happens in short-lived branches and merges back to `main`.
 - Prefer small PRs/merges aligned to one logical change.
+- A **spec/feature** usually maps to one branch (often `feat/...`); keep that branch shippable until merge.
 
 Branch naming:
 
@@ -104,22 +101,12 @@ Branch naming:
 - `chore/<short-description>`
 - `docs/<short-description>`
 
-## Suggested structure (align with TASK.md)
-
-Prefer keeping code close to the suggested layout:
-
-- `agents/` (schema_agent, query_agent)
-- `graph/` (workflow graph, routing)
-- `memory/` (persistent + session stores)
-- `tools/` (MCP tools for schema + SQL)
-- `prompts/`
-- `tests/`
-
 ## How to verify changes (minimum)
 
 When you change anything substantial:
 
-- **Formatting/lint**: run the project’s formatter/linter once they exist.
+- **Tests**: run the project’s automated tests (`pytest` or whatever the repo standardizes on) and fix failures before merging. New features and bugfixes should include tests where practical.
+- **Formatting/lint**: `uv run ruff check .` and `uv run ruff format .` (Ruff is configured in `pyproject.toml`).
 - **Smoke run**: start Postgres (`docker compose up -d`) and run a minimal agent flow that:
   - reads schema metadata
   - generates one safe SQL query with `LIMIT`
