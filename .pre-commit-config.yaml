@@ -2,6 +2,7 @@
 # Install: uv run pre-commit install
 # (installs pre-commit + commit-msg hooks for Conventional Commits)
 default_install_hook_types: [pre-commit, commit-msg]
+exclude: '^\.agents/'
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks

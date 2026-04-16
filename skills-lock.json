@@ -10,6 +10,11 @@
       "source": "juliusbrussee/caveman",
       "sourceType": "github",
       "computedHash": "76994afc39b68f4dbe098df76262b68d9928a23ee0f6aaebb11ba0e0f55bfa13"
+    },
+    "caveman-compress": {
+      "source": "juliusbrussee/caveman",
+      "sourceType": "github",
+      "computedHash": "300fb8578258161e1752a2a4142a7e9ff178c960bcb83b84422e2987421f33bf"
     }
   }
 }
