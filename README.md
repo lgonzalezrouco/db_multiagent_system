@@ -35,7 +35,7 @@ This creates/updates the virtualenv and installs the project (editable) plus dev
 The app talks to database **`dvdrental`** (DVD Rental sample data). [docker-compose.yml](docker-compose.yml) sets `POSTGRES_DB` to **`dvdrental`** and the healthcheck uses that same database (`pg_isready` on `dvdrental`).
 
 1. Ensure `db/dvdrental.tar` is present (used on first container init).
-2. Start Postgres:
+2. Start Postgres (and the MCP server in this branch):
 
    ```bash
    docker compose up -d
@@ -47,7 +47,7 @@ The app talks to database **`dvdrental`** (DVD Rental sample data). [docker-comp
    docker ps --filter name=multiagent-postgres
    ```
 
-4. Optional sanity check:
+4. Optional sanity check (Postgres):
 
    ```bash
    docker exec -it multiagent-postgres psql -U postgres -d dvdrental -c '\dt'
@@ -85,15 +85,26 @@ MCP (streamable HTTP) variables (used when running the MCP server):
 
 ---
 
-## 4. Run the bootstrap entrypoint
+## 4. Run the end-to-end demo (bootstrap + MCP tools)
 
-Proves a read-only connection and runs a trivial `SELECT` against `dvdrental`:
+This repo’s `main.py` runs:
+
+- a **bootstrap** check (read-only DB connection + a trivial `SELECT`)
+- then a small **MCP demo** that calls the running MCP server over streamable HTTP
+
+Prereq: `docker compose up -d` (brings up Postgres + `mcp-server`).
 
 ```bash
 uv run python main.py
 ```
 
-Expect exit code **0** and a log line similar to `bootstrap_ok database=dvdrental ...`. Wrong host/password yields a non-zero exit and an error log.
+Expect exit code **0** and output that includes:
+
+- `bootstrap_ok database=dvdrental ...`
+- `MCP endpoint: http://127.0.0.1:8000/mcp`
+- tool names including `inspect_schema` and `execute_readonly_sql`
+
+The MCP server exposes streamable HTTP on **`/mcp`** (default `http://127.0.0.1:8000/mcp`).
 
 ---
 
@@ -101,11 +112,17 @@ Expect exit code **0** and a log line similar to `bootstrap_ok database=dvdrenta
 
 | Command | What it does |
 | --- | --- |
-| `uv run pytest tests/ -q` | All tests. The integration test **skips** if Postgres is not reachable. |
+| `uv run pytest tests/ -q` | All tests. Integration tests **skip** if Postgres is not reachable. |
 | `uv run pytest tests/test_bootstrap_smoke.py -q` | Bootstrap tests only |
 | `uv run pytest -m integration -q` | Only tests marked `@pytest.mark.integration` (needs Postgres + valid `.env`) |
 
 `tests/conftest.py` loads **`.env`** from the repo root (via pytest’s `config.rootpath`) so `Settings()` can be built for unit and integration tests (`override=False` preserves env vars already set in the shell).
+
+MCP-specific tests live alongside the rest:
+
+- `tests/test_mcp_streamable_http_client.py`: starts an in-process streamable HTTP server and asserts the tool list includes `inspect_schema` and `execute_readonly_sql`
+- `tests/test_mcp_readonly_unit.py`: read-only SQL validator unit tests (no DB)
+- `tests/test_mcp_db_integration.py`: integration tests against live `dvdrental`
 
 ---
 
@@ -143,6 +160,7 @@ src/mcp_server/
   main.py                    # MCP server entrypoint (streamable HTTP)
   readonly_sql.py            # read-only SQL validation + safety checks
   schema_metadata.py         # schema introspection helpers
+  tools.py                   # MCP tool registration (inspect_schema, execute_readonly_sql)
 src/utils/                   # small shared helpers
 tests/
   conftest.py                # load .env for tests
