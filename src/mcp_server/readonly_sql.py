@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 from psycopg.rows import dict_row
 
-from config.settings import Settings
+from config.postgres_settings import PostgresSettings
 from utils.postgres import connect_async
 
 FORBIDDEN_TOKENS: frozenset[str] = frozenset(
@@ -152,7 +152,7 @@ def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any] | None]:
 
 
 async def execute_readonly_sql(
-    settings: Settings,
+    settings: PostgresSettings,
     sql: str,
 ) -> dict[str, Any]:
     """Validate and run a single read-only statement; return spec-shaped dict."""

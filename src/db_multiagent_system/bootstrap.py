@@ -4,14 +4,14 @@ import psycopg
 from psycopg import OperationalError
 from pydantic import ValidationError
 
-from config import Settings
+from config import PostgresSettings
 
 logger = logging.getLogger(__name__)
 
 
 def run() -> int:
     try:
-        settings = Settings()
+        settings = PostgresSettings()
     except ValidationError as exc:
         logger.error("Configuration error: %s", exc)
         return 1

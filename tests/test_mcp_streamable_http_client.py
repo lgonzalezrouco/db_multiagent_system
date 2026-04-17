@@ -27,10 +27,10 @@ async def test_streamable_http_lists_tools(monkeypatch: pytest.MonkeyPatch) -> N
     import uvicorn
     from langchain_mcp_adapters.client import MultiServerMCPClient
 
-    from config.settings import Settings
+    from config.postgres_settings import PostgresSettings
     from mcp_server.main import build_app
 
-    settings = Settings()
+    settings = PostgresSettings()
     mcp = build_app(settings)
     starlette_app = mcp.streamable_http_app()
     config = uvicorn.Config(

@@ -16,7 +16,7 @@ from typing import Any
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from pydantic import ValidationError
 
-from config import Settings
+from config import PostgresSettings
 from mcp_server.readonly_sql import execute_readonly_sql, validate_readonly_sql
 from mcp_server.schema_metadata import fetch_schema_metadata
 
@@ -71,7 +71,7 @@ def _print_mcp_tool_raw(label: str, raw: Any) -> None:
         print(json.dumps(raw, indent=2, default=str))
 
 
-def _mcp_streamable_http_url(settings: Settings) -> str:
+def _mcp_streamable_http_url(settings: PostgresSettings) -> str:
     """URL for MultiServerMCPClient (streamable HTTP ``/mcp`` on the running server)."""
     if settings.mcp_server_url:
         return settings.mcp_server_url.strip().rstrip("/")
@@ -80,7 +80,7 @@ def _mcp_streamable_http_url(settings: Settings) -> str:
     return f"http://{connect_host}:{settings.mcp_port}/mcp"
 
 
-async def _mcp_http_inspect_schema_demo(settings: Settings) -> int:
+async def _mcp_http_inspect_schema_demo(settings: PostgresSettings) -> int:
     """Call ``inspect_schema`` on the MCP server already bound (e.g. docker compose)."""
     url = _mcp_streamable_http_url(settings)
     print(f"MCP endpoint: {url}")
@@ -110,7 +110,7 @@ async def _mcp_http_inspect_schema_demo(settings: Settings) -> int:
 
 async def run_async() -> int:
     try:
-        settings = Settings()
+        settings = PostgresSettings()
     except ValidationError as exc:
         logger.error("Configuration error: %s", exc)
         return 1

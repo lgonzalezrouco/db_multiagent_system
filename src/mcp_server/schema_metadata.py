@@ -6,12 +6,12 @@ from typing import Any
 
 import psycopg
 
-from config.settings import Settings
+from config.postgres_settings import PostgresSettings
 from utils.postgres import connect_async
 
 
 async def fetch_schema_metadata(
-    settings: Settings,
+    settings: PostgresSettings,
     *,
     schema_name: str = "public",
     table_name: str | None = None,
