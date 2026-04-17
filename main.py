@@ -1,7 +1,8 @@
 import logging
 import sys
 
-from db_multiagent_system.bootstrap import run
+from db_multiagent_system import bootstrap
+from db_multiagent_system.mcp_demo import run as run_mcp_demo
 
 
 def main() -> int:
@@ -9,7 +10,10 @@ def main() -> int:
         level=logging.INFO,
         format="%(levelname)s %(message)s",
     )
-    return run()
+    code = bootstrap.run()
+    if code != 0:
+        return code
+    return run_mcp_demo()
 
 
 if __name__ == "__main__":
