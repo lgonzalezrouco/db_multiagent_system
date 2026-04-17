@@ -1,4 +1,4 @@
-"""LangGraph workflow: schema-presence gate → schema pipeline or query_stub."""
+"""LangGraph workflow: schema-presence gate → schema pipeline or query pipeline."""
 
 from __future__ import annotations
 
@@ -10,8 +10,17 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from graph.nodes import query_stub
 from graph.presence import FileSchemaPresence, SchemaPresence
+from graph.query_pipeline import (
+    query_critic,
+    query_execute,
+    query_explain,
+    query_generate_sql,
+    query_load_context,
+    query_plan,
+    query_refine_cap,
+    route_after_critic,
+)
 from graph.schema_pipeline import (
     schema_draft,
     schema_hitl,
@@ -64,20 +73,41 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     workflow.add_node("schema_draft", schema_draft)
     workflow.add_node("schema_hitl", schema_hitl)
     workflow.add_node("schema_persist", schema_persist)
-    workflow.add_node("query_stub", query_stub)
+    workflow.add_node("query_load_context", query_load_context)
+    workflow.add_node("query_plan", query_plan)
+    workflow.add_node("query_generate_sql", query_generate_sql)
+    workflow.add_node("query_critic", query_critic)
+    workflow.add_node("query_execute", query_execute)
+    workflow.add_node("query_explain", query_explain)
+    workflow.add_node("query_refine_cap", query_refine_cap)
     workflow.add_conditional_edges(
         START,
         route_after_start,
         {
             "schema_path": "schema_inspect",
-            "query_path": "query_stub",
+            "query_path": "query_load_context",
         },
     )
     workflow.add_edge("schema_inspect", "schema_draft")
     workflow.add_edge("schema_draft", "schema_hitl")
     workflow.add_edge("schema_hitl", "schema_persist")
     workflow.add_edge("schema_persist", END)
-    workflow.add_edge("query_stub", END)
+
+    workflow.add_edge("query_load_context", "query_plan")
+    workflow.add_edge("query_plan", "query_generate_sql")
+    workflow.add_edge("query_generate_sql", "query_critic")
+    workflow.add_conditional_edges(
+        "query_critic",
+        route_after_critic,
+        {
+            "execute": "query_execute",
+            "retry": "query_generate_sql",
+            "cap": "query_refine_cap",
+        },
+    )
+    workflow.add_edge("query_execute", "query_explain")
+    workflow.add_edge("query_explain", END)
+    workflow.add_edge("query_refine_cap", END)
     return workflow
 
 

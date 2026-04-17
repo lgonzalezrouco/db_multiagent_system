@@ -44,25 +44,25 @@ def test_validate_readonly_sql(sql: str, expect_ok: bool) -> None:
 def test_validate_ignores_forbidden_token_inside_string() -> None:
     ok, err = validate_readonly_sql("SELECT 'DELETE' AS x")
     assert ok is True
-    assert err is None
+    assert err == {}
 
 
 def test_validate_ignores_forbidden_token_inside_double_quoted_literal() -> None:
     ok, err = validate_readonly_sql('SELECT "INSERT" AS x')
     assert ok is True
-    assert err is None
+    assert err == {}
 
 
 def test_validate_ignores_forbidden_token_inside_dollar_quoted_string() -> None:
     ok, err = validate_readonly_sql("SELECT $$DROP$$::text")
     assert ok is True
-    assert err is None
+    assert err == {}
 
 
 def test_validate_allows_delete_in_line_comment() -> None:
     ok, err = validate_readonly_sql("SELECT 1 -- DELETE not executed")
     assert ok is True
-    assert err is None
+    assert err == {}
 
 
 def test_validate_multi_statement_error_message() -> None:

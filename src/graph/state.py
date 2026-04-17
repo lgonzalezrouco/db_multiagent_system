@@ -6,7 +6,7 @@ from typing import TypedDict
 
 
 class GraphState(TypedDict, total=False):
-    """LangGraph state: schema gate and schema HITL fields."""
+    """LangGraph state: schema gate, schema HITL, and query pipeline fields."""
 
     user_input: str
     steps: list[str]
@@ -19,3 +19,12 @@ class GraphState(TypedDict, total=False):
     schema_approved: dict | None
     hitl_prompt: dict | None
     persist_error: str | None
+    schema_docs_context: dict | None
+    schema_docs_warning: str | None
+    query_plan: dict | None
+    generated_sql: str | None
+    critic_status: str | None
+    critic_feedback: str | None
+    refinement_count: int
+    query_execution_result: dict | None
+    query_explanation: str | None

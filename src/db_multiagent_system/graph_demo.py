@@ -1,4 +1,4 @@
-"""Exercise the LangGraph shell: compile and ``ainvoke`` the query stub via MCP.
+"""Exercise the LangGraph shell: compile and ``ainvoke`` the query pipeline via MCP.
 
 Requires a running MCP HTTP server (e.g. ``docker compose up``) and ``.env``
 pointing at it, same as ``mcp_demo.py``. The graph node calls
@@ -50,7 +50,7 @@ async def run_async() -> int:
         logger.error("Configuration error: %s", exc)
         return 1
 
-    _print_section("LangGraph shell — compile and ainvoke (query_stub → MCP SQL)")
+    _print_section("LangGraph shell — compile and ainvoke (query pipeline → MCP SQL)")
     presence: SchemaPresence = _GraphDemoQueryPathPresence()
     app = get_compiled_graph(presence=presence)
     initial: GraphState = {
@@ -69,8 +69,11 @@ async def run_async() -> int:
         return 1
 
     last_result = result.get("last_result")
-    if not isinstance(last_result, dict) or last_result.get("success") is not True:
-        logger.error("expected last_result.success True, got %r", last_result)
+    if not isinstance(last_result, dict) or last_result.get("kind") != "query_answer":
+        logger.error(
+            "expected last_result.kind == 'query_answer', got %r",
+            last_result,
+        )
         return 1
 
     _print_section("graph_demo_ok")

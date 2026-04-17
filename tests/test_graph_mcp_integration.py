@@ -1,4 +1,4 @@
-"""Integration: LangGraph query_stub → live MCP HTTP → Postgres (docker compose)."""
+"""Integration: LangGraph query pipeline → live MCP HTTP → Postgres (docker compose)."""
 
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ def _settings_or_skip() -> PostgresSettings:
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_query_stub_via_live_mcp_http(
+async def test_query_pipeline_via_live_mcp_http(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """In-process MCP server on a free port; graph calls execute_readonly_sql."""
@@ -61,17 +61,28 @@ async def test_query_stub_via_live_mcp_http(
         )
 
         if result.get("last_error"):
-            err = result.get("last_result")
-            if isinstance(err, dict):
-                nested = err.get("error") or {}
-                if nested.get("type") == "connection_error":
-                    pytest.skip("Postgres unreachable (is docker compose up?)")
+            qer = result.get("query_execution_result")
+            nested: dict = {}
+            if isinstance(qer, dict):
+                err = qer.get("error")
+                if isinstance(err, dict):
+                    nested = err
+            if nested.get("type") == "connection_error":
+                pytest.skip("Postgres unreachable (is docker compose up?)")
             pytest.fail(f"graph left last_error set: {result!r}")
 
         lr = result.get("last_result")
         assert isinstance(lr, dict)
-        assert lr.get("success") is True
-        assert result.get("steps") == ["gate:query_path", "query_stub"]
+        assert lr.get("kind") == "query_answer"
+        assert result.get("steps") == [
+            "gate:query_path",
+            "query_load_context",
+            "query_plan",
+            "query_generate_sql",
+            "query_critic",
+            "query_execute",
+            "query_explain",
+        ]
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=10.0)
