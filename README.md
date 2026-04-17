@@ -75,6 +75,14 @@ Variables:
 | `POSTGRES_PASSWORD` | Password (matches Compose in dev) |
 | `POSTGRES_DB` | Must be **`dvdrental`** for this dataset |
 
+MCP (streamable HTTP) variables (used when running the MCP server):
+
+| Variable | Purpose |
+| --- | --- |
+| `MCP_HOST` | Host/interface to bind (e.g. `127.0.0.1` locally, `0.0.0.0` in Docker) |
+| `MCP_PORT` | Port to bind (default in this repo: `8000`) |
+| `MCP_SERVER_URL` | Full client URL (e.g. `http://127.0.0.1:8000/mcp`) |
+
 ---
 
 ## 4. Run the bootstrap entrypoint
@@ -130,11 +138,18 @@ src/config/
   settings.py                # pydantic-settings (package `config`)
 src/db_multiagent_system/
   bootstrap.py               # connect + read-only SELECT
+  mcp_demo.py                # demo client for MCP server/tools
+src/mcp_server/
+  main.py                    # MCP server entrypoint (streamable HTTP)
+  readonly_sql.py            # read-only SQL validation + safety checks
+  schema_metadata.py         # schema introspection helpers
+src/utils/                   # small shared helpers
 tests/
   conftest.py                # load .env for tests
   test_bootstrap_smoke.py
 db/                          # dvdrental.tar + restore script
 docker-compose.yml
+Dockerfile                   # container image for MCP server
 specs/                       # feature specs (e.g. 01-bootstrap)
 ```
 
