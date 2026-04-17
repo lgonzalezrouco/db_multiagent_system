@@ -7,6 +7,9 @@ Individual course project: a **natural-language query system** over PostgreSQL u
 | [TASK.md](TASK.md) | Full assignment: agents, memory, MCP, deliverables, rubric |
 | [AGENTS.md](AGENTS.md) | Repo workflow: `uv`, safety rules, Git conventions, verification |
 | [specs/01-bootstrap.md](specs/01-bootstrap.md) | Bootstrap spec (layout, DB proof, tooling) |
+| [specs/02-tools-mcp.md](specs/02-tools-mcp.md) | MCP tools: schema inspection + read-only SQL, server packaging |
+| [specs/03-graph-shell.md](specs/03-graph-shell.md) | LangGraph shell: shared state, linear graph, MCP-backed query stub |
+| [specs/04-schema-gate.md](specs/04-schema-gate.md) | Gate: schema docs present for query context (not NL intent routing) |
 
 ---
 
