@@ -15,7 +15,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from config import MCPSettings
-from graph import get_compiled_graph
+from graph import GraphState, get_compiled_graph, graph_run_config
 from graph.presence import SchemaPresence, SchemaPresenceResult
 
 logger = logging.getLogger(__name__)
@@ -53,11 +53,13 @@ async def run_async() -> int:
     _print_section("LangGraph shell — compile and ainvoke (query_stub → MCP SQL)")
     presence: SchemaPresence = _GraphDemoQueryPathPresence()
     app = get_compiled_graph(presence=presence)
+    initial: GraphState = {
+        "user_input": "graph shell demo: count actors via MCP",
+        "steps": [],
+    }
     result = await app.ainvoke(
-        {
-            "user_input": "graph shell demo: count actors via MCP",
-            "steps": [],
-        },
+        initial,
+        config=graph_run_config(thread_id="graph-demo-query"),
     )
     _dump("Graph result:", dict(result))
 

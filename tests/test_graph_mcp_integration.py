@@ -10,7 +10,7 @@ import uvicorn
 from pydantic import ValidationError
 
 from config import PostgresSettings
-from graph import get_compiled_graph
+from graph import get_compiled_graph, graph_run_config
 from mcp_server.main import build_app
 from tests.schema_presence_stubs import ReadySchemaPresence
 
@@ -55,7 +55,10 @@ async def test_query_stub_via_live_mcp_http(
         monkeypatch.setenv("MCP_SERVER_URL", f"http://127.0.0.1:{port}/mcp")
 
         app = get_compiled_graph(presence=ReadySchemaPresence())
-        result = await app.ainvoke({"user_input": "integration", "steps": []})
+        result = await app.ainvoke(
+            {"user_input": "integration", "steps": []},
+            config=graph_run_config(thread_id="mcp-integration-1"),
+        )
 
         if result.get("last_error"):
             err = result.get("last_result")

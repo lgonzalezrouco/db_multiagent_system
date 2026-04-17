@@ -1,6 +1,6 @@
 """LangGraph shell: shared state, MCP-backed nodes, compiled graph."""
 
-from graph.graph import build_graph, get_compiled_graph
+from graph.graph import build_graph, get_compiled_graph, graph_run_config
 from graph.presence import (
     FileSchemaPresence,
     SchemaPresence,
@@ -17,4 +17,5 @@ __all__ = [
     "build_graph",
     "default_schema_presence_path",
     "get_compiled_graph",
+    "graph_run_config",
 ]

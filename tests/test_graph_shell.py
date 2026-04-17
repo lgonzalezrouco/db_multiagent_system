@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from graph import get_compiled_graph
+from graph import get_compiled_graph, graph_run_config
 from tests.schema_presence_stubs import ReadySchemaPresence
 
 
@@ -63,7 +63,10 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    result = await app.ainvoke({"user_input": "ping", "steps": []})
+    result = await app.ainvoke(
+        {"user_input": "ping", "steps": []},
+        config=graph_run_config(thread_id="shell-smoke-1"),
+    )
 
     assert result.get("steps") == ["gate:query_path", "query_stub"]
     assert result.get("gate_decision") == "query_path"
@@ -102,7 +105,10 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    result = await app.ainvoke({"user_input": "ping", "steps": []})
+    result = await app.ainvoke(
+        {"user_input": "ping", "steps": []},
+        config=graph_run_config(thread_id="shell-smoke-1"),
+    )
 
     assert result.get("steps") == ["gate:query_path", "query_stub"]
     assert result.get("gate_decision") == "query_path"
@@ -136,7 +142,10 @@ async def test_query_stub_logs_enter_exit(
 
     with caplog.at_level(logging.INFO, logger="graph.nodes"):
         app = get_compiled_graph(presence=ReadySchemaPresence())
-        await app.ainvoke({"user_input": "hello", "steps": []})
+        await app.ainvoke(
+            {"user_input": "hello", "steps": []},
+            config=graph_run_config(thread_id="shell-log-1"),
+        )
 
     phases = [
         r.graph_phase
@@ -171,7 +180,8 @@ async def test_query_stub_clears_last_result_on_error(
             "user_input": "ping",
             "steps": [],
             "last_result": {"success": True, "rows_returned": 123},
-        }
+        },
+        config=graph_run_config(thread_id="shell-error-1"),
     )
 
     assert result.get("steps") == ["gate:query_path", "query_stub"]

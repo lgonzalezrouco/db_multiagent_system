@@ -6,7 +6,7 @@ from typing import TypedDict
 
 
 class GraphState(TypedDict, total=False):
-    """LangGraph state including schema-presence gate fields (Spec 04)."""
+    """LangGraph state: schema gate and schema HITL fields."""
 
     user_input: str
     steps: list[str]
@@ -14,3 +14,8 @@ class GraphState(TypedDict, total=False):
     gate_decision: str | None
     last_result: str | dict | None
     last_error: str | None
+    schema_metadata: dict | None
+    schema_draft: dict | None
+    schema_approved: dict | None
+    hitl_prompt: dict | None
+    persist_error: str | None
