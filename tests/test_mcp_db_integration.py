@@ -25,7 +25,10 @@ async def test_inspect_schema_film_table() -> None:
         table_name="film",
     )
     if not result.get("success"):
-        pytest.skip("Postgres unreachable (is docker compose up running?)")
+        err = result.get("error", {})
+        if err.get("type") == "connection_error":
+            pytest.skip("Postgres unreachable (is docker compose up running?)")
+        raise AssertionError(result)
     tables = result.get("tables", [])
     assert len(tables) == 1
     assert tables[0]["table_name"] == "film"
