@@ -26,7 +26,7 @@ def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_query_path_runs_query_stub_when_ready(
+async def test_query_path_runs_query_pipeline_when_ready(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -56,12 +56,20 @@ async def test_query_path_runs_query_stub_when_ready(
         config=graph_run_config(thread_id="gate-query-1"),
     )
 
-    assert result.get("steps") == ["gate:query_path", "query_stub"]
+    assert result.get("steps") == [
+        "gate:query_path",
+        "query_load_context",
+        "query_plan",
+        "query_generate_sql",
+        "query_critic",
+        "query_execute",
+        "query_explain",
+    ]
     assert result.get("gate_decision") == "query_path"
     assert result.get("schema_ready") is True
     lr = result.get("last_result")
     assert isinstance(lr, dict)
-    assert lr.get("success") is True
+    assert lr.get("kind") == "query_answer"
 
 
 def test_file_schema_presence_ready(tmp_path: Path) -> None:

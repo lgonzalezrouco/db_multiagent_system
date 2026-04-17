@@ -10,6 +10,16 @@ import pytest
 from graph import get_compiled_graph, graph_run_config
 from tests.schema_presence_stubs import ReadySchemaPresence
 
+_QUERY_SUCCESS_STEPS = [
+    "gate:query_path",
+    "query_load_context",
+    "query_plan",
+    "query_generate_sql",
+    "query_critic",
+    "query_execute",
+    "query_explain",
+]
+
 
 @pytest.fixture
 def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -68,12 +78,12 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
         config=graph_run_config(thread_id="shell-smoke-1"),
     )
 
-    assert result.get("steps") == ["gate:query_path", "query_stub"]
+    assert result.get("steps") == _QUERY_SUCCESS_STEPS
     assert result.get("gate_decision") == "query_path"
     assert result.get("schema_ready") is True
     lr = result.get("last_result")
     assert isinstance(lr, dict)
-    assert lr.get("success") is True
+    assert lr.get("kind") == "query_answer"
     assert result.get("last_error") is None
 
 
@@ -110,17 +120,17 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
         config=graph_run_config(thread_id="shell-smoke-1"),
     )
 
-    assert result.get("steps") == ["gate:query_path", "query_stub"]
+    assert result.get("steps") == _QUERY_SUCCESS_STEPS
     assert result.get("gate_decision") == "query_path"
     assert result.get("schema_ready") is True
     lr = result.get("last_result")
     assert isinstance(lr, dict)
-    assert lr.get("success") is True
+    assert lr.get("kind") == "query_answer"
     assert result.get("last_error") is None
 
 
 @pytest.mark.asyncio
-async def test_query_stub_logs_enter_exit(
+async def test_query_pipeline_logs_enter_exit(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
     caplog: pytest.LogCaptureFixture,
@@ -140,7 +150,7 @@ async def test_query_stub_logs_enter_exit(
 
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
-    with caplog.at_level(logging.INFO, logger="graph.nodes"):
+    with caplog.at_level(logging.INFO, logger="graph.query_pipeline"):
         app = get_compiled_graph(presence=ReadySchemaPresence())
         await app.ainvoke(
             {"user_input": "hello", "steps": []},
@@ -154,12 +164,12 @@ async def test_query_stub_logs_enter_exit(
     ]
     assert "enter" in phases
     assert "exit" in phases
-    nodes = [r.graph_node for r in caplog.records if hasattr(r, "graph_node")]
-    assert all(n == "query_stub" for n in nodes)
+    nodes = {r.graph_node for r in caplog.records if hasattr(r, "graph_node")}
+    assert "query_execute" in nodes
 
 
 @pytest.mark.asyncio
-async def test_query_stub_clears_last_result_on_error(
+async def test_query_pipeline_clears_last_result_on_tool_error(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -179,11 +189,11 @@ async def test_query_stub_clears_last_result_on_error(
         {
             "user_input": "ping",
             "steps": [],
-            "last_result": {"success": True, "rows_returned": 123},
+            "last_result": {"kind": "query_answer", "sql": "SELECT 1"},
         },
         config=graph_run_config(thread_id="shell-error-1"),
     )
 
-    assert result.get("steps") == ["gate:query_path", "query_stub"]
+    assert result.get("steps") == _QUERY_SUCCESS_STEPS
     assert result.get("last_error") is not None
     assert result.get("last_result") is None
