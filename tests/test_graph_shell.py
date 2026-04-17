@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from graph import get_compiled_graph
+from tests.schema_presence_stubs import ReadySchemaPresence
 
 
 @pytest.fixture
@@ -61,10 +62,12 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
 
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
-    app = get_compiled_graph()
+    app = get_compiled_graph(presence=ReadySchemaPresence())
     result = await app.ainvoke({"user_input": "ping", "steps": []})
 
-    assert result.get("steps") == ["query_stub"]
+    assert result.get("steps") == ["gate:query_path", "query_stub"]
+    assert result.get("gate_decision") == "query_path"
+    assert result.get("schema_ready") is True
     lr = result.get("last_result")
     assert isinstance(lr, dict)
     assert lr.get("success") is True
@@ -98,10 +101,12 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
 
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
-    app = get_compiled_graph()
+    app = get_compiled_graph(presence=ReadySchemaPresence())
     result = await app.ainvoke({"user_input": "ping", "steps": []})
 
-    assert result.get("steps") == ["query_stub"]
+    assert result.get("steps") == ["gate:query_path", "query_stub"]
+    assert result.get("gate_decision") == "query_path"
+    assert result.get("schema_ready") is True
     lr = result.get("last_result")
     assert isinstance(lr, dict)
     assert lr.get("success") is True
@@ -130,7 +135,7 @@ async def test_query_stub_logs_enter_exit(
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
     with caplog.at_level(logging.INFO, logger="graph.nodes"):
-        app = get_compiled_graph()
+        app = get_compiled_graph(presence=ReadySchemaPresence())
         await app.ainvoke({"user_input": "hello", "steps": []})
 
     phases = [
@@ -160,7 +165,7 @@ async def test_query_stub_clears_last_result_on_error(
 
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
-    app = get_compiled_graph()
+    app = get_compiled_graph(presence=ReadySchemaPresence())
     result = await app.ainvoke(
         {
             "user_input": "ping",
@@ -169,6 +174,6 @@ async def test_query_stub_clears_last_result_on_error(
         }
     )
 
-    assert result.get("steps") == ["query_stub"]
+    assert result.get("steps") == ["gate:query_path", "query_stub"]
     assert result.get("last_error") is not None
     assert result.get("last_result") is None
