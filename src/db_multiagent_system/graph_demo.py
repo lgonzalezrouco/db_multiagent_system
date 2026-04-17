@@ -16,8 +16,19 @@ from pydantic import ValidationError
 
 from config import MCPSettings
 from graph import get_compiled_graph
+from graph.presence import SchemaPresence, SchemaPresenceResult
 
 logger = logging.getLogger(__name__)
+
+
+class _GraphDemoQueryPathPresence:
+    """Force the query branch so this demo exercises ``execute_readonly_sql``."""
+
+    def check(self) -> SchemaPresenceResult:
+        return SchemaPresenceResult(
+            True,
+            "graph_demo: force query path (marker file optional)",
+        )
 
 
 def _print_section(title: str) -> None:
@@ -40,7 +51,8 @@ async def run_async() -> int:
         return 1
 
     _print_section("LangGraph shell — compile and ainvoke (query_stub → MCP SQL)")
-    app = get_compiled_graph()
+    presence: SchemaPresence = _GraphDemoQueryPathPresence()
+    app = get_compiled_graph(presence=presence)
     result = await app.ainvoke(
         {
             "user_input": "graph shell demo: count actors via MCP",

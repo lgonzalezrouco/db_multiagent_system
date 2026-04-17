@@ -57,7 +57,7 @@ dev = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["config", "db_multiagent_system", "graph", "mcp_server", "utils"]
+known-first-party = ["config", "db_multiagent_system", "graph", "mcp_server", "tests", "utils"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -65,3 +65,8 @@ testpaths = ["tests"]
 markers = [
     "integration: needs Postgres (see README)",
 ]
+
+[tool.pyrefly]
+python-version = "3.12"
+search-path = ["src", "."]
+project-includes = ["src/**/*.py", "tests/**/*.py"]

@@ -18,6 +18,26 @@ logger = logging.getLogger(__name__)
 _STUB_SQL = "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 1"
 
 
+def _inspect_schema_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
+    """Short summary for ``GraphState.last_result`` after ``inspect_schema``."""
+    if not payload:
+        return {"kind": "inspect_schema", "success": False, "detail": "no_payload"}
+    if payload.get("success"):
+        tables = payload.get("tables") or []
+        return {
+            "kind": "inspect_schema",
+            "success": True,
+            "table_count": len(tables),
+        }
+    err = payload.get("error")
+    err_type = err.get("type", "unknown") if isinstance(err, dict) else "unknown"
+    return {
+        "kind": "inspect_schema",
+        "success": False,
+        "error_type": err_type,
+    }
+
+
 def _graph_debug() -> bool:
     return os.environ.get("GRAPH_DEBUG", "").lower() in ("1", "true", "yes")
 
@@ -106,9 +126,143 @@ async def get_mcp_client(settings: MCPSettings) -> MultiServerMCPClient:
     )
 
 
+async def schema_stub(state: GraphState) -> dict[str, Any]:
+    """Prerequisite path: ``inspect_schema`` via MCP"""
+    steps = list(state.get("steps", []))
+    gate_decision = "schema_path"
+    steps.append(f"gate:{gate_decision}")
+    steps.append("schema_stub")
+
+    logger.info(
+        "graph_node_transition",
+        extra={
+            "graph_node": "schema_stub",
+            "graph_phase": "enter",
+            "user_input_preview": _user_input_preview(state),
+            "steps_count": len(steps),
+            "gate_decision": gate_decision,
+        },
+    )
+    if _graph_debug():
+        logger.debug(
+            "graph_node_debug_snapshot",
+            extra={
+                "graph_node": "schema_stub",
+                "graph_phase": "enter_debug",
+                "state_keys": sorted(state.keys()),
+            },
+        )
+
+    out: dict[str, Any] = {
+        "steps": steps,
+        "last_error": None,
+        "last_result": None,
+        "gate_decision": gate_decision,
+        "schema_ready": False,
+    }
+
+    try:
+        settings = MCPSettings()
+        client = await get_mcp_client(settings)
+        tools = await client.get_tools()
+        inspect_tool = next((t for t in tools if t.name == "inspect_schema"), None)
+        if inspect_tool is None:
+            msg = "MCP tool inspect_schema not found"
+            out["last_error"] = msg
+            logger.info(
+                "graph_node_transition",
+                extra={
+                    "graph_node": "schema_stub",
+                    "graph_phase": "exit",
+                    "mcp_status": "error",
+                    "steps_count": len(steps),
+                    "result_summary": "tool_missing",
+                },
+            )
+            return out
+
+        raw = await inspect_tool.ainvoke({"schema_name": "public", "table_name": None})
+        payload = _tool_result_to_dict(raw)
+        if payload and payload.get("success"):
+            out["last_result"] = _inspect_schema_summary(payload)
+            logger.info(
+                "graph_node_transition",
+                extra={
+                    "graph_node": "schema_stub",
+                    "graph_phase": "exit",
+                    "mcp_status": "success",
+                    "steps_count": len(steps),
+                    "result_summary": "inspect_schema_ok",
+                },
+            )
+        else:
+            err = (payload or {}).get("error") if isinstance(payload, dict) else None
+            err_type = (
+                err.get("type", "unknown") if isinstance(err, dict) else "unknown"
+            )
+            out["last_error"] = (
+                f"MCP inspect_schema failed ({err_type})"
+                if payload
+                else "could not parse MCP tool result"
+            )
+            out["last_result"] = _inspect_schema_summary(payload)
+            logger.info(
+                "graph_node_transition",
+                extra={
+                    "graph_node": "schema_stub",
+                    "graph_phase": "exit",
+                    "mcp_status": "error",
+                    "steps_count": len(steps),
+                    "result_summary": f"mcp_error_type={err_type}",
+                },
+            )
+    except ValidationError as exc:
+        out["last_error"] = _format_settings_validation_error(exc)
+        logger.info(
+            "graph_node_transition",
+            extra={
+                "graph_node": "schema_stub",
+                "graph_phase": "exit",
+                "mcp_status": "error",
+                "steps_count": len(steps),
+                "result_summary": "settings_validation_error",
+            },
+        )
+    except OSError as exc:
+        out["last_error"] = f"MCP connection error: {type(exc).__name__}"
+        logger.info(
+            "graph_node_transition",
+            extra={
+                "graph_node": "schema_stub",
+                "graph_phase": "exit",
+                "mcp_status": "error",
+                "steps_count": len(steps),
+                "result_summary": "connection_error",
+            },
+        )
+    except Exception as exc:
+        exc_name = type(exc).__name__
+        out["last_error"] = f"Unexpected error: {exc_name}"
+        logger.info(
+            "graph_node_transition",
+            extra={
+                "graph_node": "schema_stub",
+                "graph_phase": "exit",
+                "mcp_status": "error",
+                "steps_count": len(steps),
+                "result_summary": exc_name,
+            },
+        )
+
+    return out
+
+
 async def query_stub(state: GraphState) -> dict[str, Any]:
     """Run a fixed safe SELECT via MCP ``execute_readonly_sql``."""
     steps = list(state.get("steps", []))
+    gate_decision = "query_path"
+    steps.append(f"gate:{gate_decision}")
+    steps.append("query_stub")
 
     logger.info(
         "graph_node_transition",
@@ -117,6 +271,7 @@ async def query_stub(state: GraphState) -> dict[str, Any]:
             "graph_phase": "enter",
             "user_input_preview": _user_input_preview(state),
             "steps_count": len(steps),
+            "gate_decision": gate_decision,
         },
     )
     if _graph_debug():
@@ -129,8 +284,13 @@ async def query_stub(state: GraphState) -> dict[str, Any]:
             },
         )
 
-    steps.append("query_stub")
-    out: dict[str, Any] = {"steps": steps, "last_error": None, "last_result": None}
+    out: dict[str, Any] = {
+        "steps": steps,
+        "last_error": None,
+        "last_result": None,
+        "gate_decision": gate_decision,
+        "schema_ready": True,
+    }
 
     try:
         settings = MCPSettings()

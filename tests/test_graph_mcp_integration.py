@@ -12,6 +12,7 @@ from pydantic import ValidationError
 from config import PostgresSettings
 from graph import get_compiled_graph
 from mcp_server.main import build_app
+from tests.schema_presence_stubs import ReadySchemaPresence
 
 
 def _settings_or_skip() -> PostgresSettings:
@@ -53,7 +54,7 @@ async def test_query_stub_via_live_mcp_http(
         await asyncio.wait_for(_wait_for_server_started(), timeout=10.0)
         monkeypatch.setenv("MCP_SERVER_URL", f"http://127.0.0.1:{port}/mcp")
 
-        app = get_compiled_graph()
+        app = get_compiled_graph(presence=ReadySchemaPresence())
         result = await app.ainvoke({"user_input": "integration", "steps": []})
 
         if result.get("last_error"):
@@ -67,7 +68,7 @@ async def test_query_stub_via_live_mcp_http(
         lr = result.get("last_result")
         assert isinstance(lr, dict)
         assert lr.get("success") is True
-        assert result.get("steps") == ["query_stub"]
+        assert result.get("steps") == ["gate:query_path", "query_stub"]
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=10.0)
