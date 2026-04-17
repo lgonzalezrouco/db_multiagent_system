@@ -108,10 +108,15 @@ def _mask_sql(sql: str) -> str:
     return "".join(out)
 
 
-def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any] | None]:
+def mask_sql_for_analysis(sql: str) -> str:
+    """Blank comments and literals so callers can inspect SQL structure (e.g. LIMIT)."""
+    return _mask_sql(sql)
+
+
+def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any]]:
     """
     Return (ok, error_payload) where error_payload matches spec error JSON
-    (top-level success=false).
+    (top-level success=false). On success, returns empty dict.
     """
     if not sql or not sql.strip():
         return False, {
@@ -148,7 +153,7 @@ def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any] | None]:
                 },
             }
 
-    return True, None
+    return True, {}
 
 
 async def execute_readonly_sql(
@@ -169,7 +174,7 @@ async def execute_readonly_sql(
             await connect_async(settings) as conn,
             conn.cursor(row_factory=dict_row) as cur,
         ):
-            await cur.execute(stmt)
+            await cur.execute(stmt)  # type: ignore[arg-type]
             if cur.description is None:
                 return {
                     "success": True,

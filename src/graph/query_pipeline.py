@@ -16,7 +16,11 @@ from config import MCPSettings
 from graph import nodes as graph_nodes
 from graph.schema_paths import schema_docs_path_from_env
 from graph.state import GraphState
-from mcp_server.readonly_sql import truncate_sql_preview, validate_readonly_sql
+from mcp_server.readonly_sql import (
+    mask_sql_for_analysis,
+    truncate_sql_preview,
+    validate_readonly_sql,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +48,8 @@ def validate_sql_for_execution(sql: str | None) -> tuple[bool, str]:
             msg = str(err["message"])
         return False, msg
 
-    if not re.search(r"\bLIMIT\b", sql.strip(), flags=re.IGNORECASE):
+    masked = mask_sql_for_analysis(sql.strip())
+    if not re.search(r"\bLIMIT\b", masked, flags=re.IGNORECASE):
         return False, "SQL must include a LIMIT clause."
 
     return True, ""
@@ -318,11 +323,8 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
             err_type = (
                 err.get("type", "unknown") if isinstance(err, dict) else "unknown"
             )
-            out["last_error"] = (
-                f"MCP execute_readonly_sql failed ({err_type})"
-                if payload
-                else "could not parse MCP tool result"
-            )
+            if not isinstance(payload, dict):
+                out["last_error"] = "could not parse MCP tool result"
             logger.info(
                 "graph_node_transition",
                 extra={

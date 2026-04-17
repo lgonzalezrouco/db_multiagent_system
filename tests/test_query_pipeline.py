@@ -32,6 +32,35 @@ def test_validate_sql_for_execution_requires_limit_and_readonly() -> None:
     assert ok2 is True
 
 
+def test_validate_sql_limit_not_satisfied_by_comment_decoy() -> None:
+    ok, fb = validate_sql_for_execution(
+        "SELECT * FROM public.actor -- LIMIT 1",
+    )
+    assert ok is False
+    assert "LIMIT" in fb
+
+
+def test_validate_sql_limit_not_satisfied_by_string_literal_decoy() -> None:
+    ok, fb = validate_sql_for_execution(
+        "SELECT * FROM public.actor WHERE note = 'LIMIT 999'",
+    )
+    assert ok is False
+
+
+def test_validate_sql_limit_not_satisfied_by_block_comment_decoy() -> None:
+    ok, fb = validate_sql_for_execution(
+        "SELECT * FROM public.actor /* LIMIT 50 */",
+    )
+    assert ok is False
+
+
+def test_validate_sql_limit_with_literal_containing_word_limit() -> None:
+    ok, _fb = validate_sql_for_execution(
+        "SELECT * FROM public.actor WHERE slug = 'LIMIT' LIMIT 10",
+    )
+    assert ok is True
+
+
 @pytest.mark.asyncio
 async def test_critic_retry_then_success(
     postgres_env: None,
@@ -192,3 +221,41 @@ async def test_missing_schema_docs_sets_warning(
     assert lr.get("kind") == "query_answer"
     lim = lr.get("limitations")
     assert isinstance(lim, str) and warn in lim
+
+
+@pytest.mark.asyncio
+async def test_query_explain_uses_mcp_error_message(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_msg = 'relation "missing_table" does not exist'
+
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": False,
+                "error": {
+                    "type": "database_error",
+                    "message": expected_msg,
+                },
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    result = await app.ainvoke(
+        {"user_input": "broken query path", "steps": []},
+        config=graph_run_config(thread_id="query-mcp-err-1"),
+    )
+
+    assert result.get("last_error") == expected_msg
+    assert result.get("last_result") is None
