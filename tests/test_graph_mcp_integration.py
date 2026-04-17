@@ -9,14 +9,14 @@ import pytest
 import uvicorn
 from pydantic import ValidationError
 
-from config import Settings
+from config import PostgresSettings
 from graph import get_compiled_graph
 from mcp_server.main import build_app
 
 
-def _settings_or_skip() -> Settings:
+def _settings_or_skip() -> PostgresSettings:
     try:
-        return Settings()
+        return PostgresSettings()
     except ValidationError:
         pytest.skip("Postgres / MCP settings missing or invalid (.env not found?)")
 

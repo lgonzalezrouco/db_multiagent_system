@@ -8,7 +8,7 @@ from typing import Any
 
 from mcp.server.fastmcp import FastMCP
 
-from config.settings import Settings
+from config.postgres_settings import PostgresSettings
 from mcp_server.readonly_sql import (
     execute_readonly_sql,
     truncate_sql_preview,
@@ -19,7 +19,7 @@ from mcp_server.schema_metadata import fetch_schema_metadata
 logger = logging.getLogger("mcp_server")
 
 
-def register_tools(app: FastMCP, settings: Settings) -> None:
+def register_tools(app: FastMCP, settings: PostgresSettings) -> None:
     """Attach `inspect_schema` and `execute_readonly_sql` to the FastMCP app."""
 
     async def inspect_schema(

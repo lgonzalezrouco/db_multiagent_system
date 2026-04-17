@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import psycopg
 
-from config.settings import Settings
+from config.postgres_settings import PostgresSettings
 
 
-def postgres_conninfo(settings: Settings, *, connect_timeout: int = 10) -> str:
+def postgres_conninfo(settings: PostgresSettings, *, connect_timeout: int = 10) -> str:
     """Build a libpq connection string from application settings."""
     return psycopg.conninfo.make_conninfo(
         host=settings.postgres_host,
@@ -20,7 +20,7 @@ def postgres_conninfo(settings: Settings, *, connect_timeout: int = 10) -> str:
 
 
 async def connect_async(
-    settings: Settings,
+    settings: PostgresSettings,
     *,
     connect_timeout: int = 10,
 ) -> psycopg.AsyncConnection:

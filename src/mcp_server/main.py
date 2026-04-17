@@ -7,13 +7,13 @@ import sys
 
 from mcp.server.fastmcp import FastMCP
 
-from config.settings import Settings
+from config.postgres_settings import PostgresSettings
 from mcp_server.tools import register_tools
 
 
-def build_app(settings: Settings | None = None) -> FastMCP:
+def build_app(settings: PostgresSettings | None = None) -> FastMCP:
     """Construct FastMCP with streamable-http defaults and registered tools."""
-    cfg = settings or Settings()
+    cfg = settings or PostgresSettings()
     transport_security = None
     if cfg.mcp_host in ("127.0.0.1", "localhost", "::1"):
         from mcp.server.transport_security import TransportSecuritySettings
@@ -45,7 +45,7 @@ def main() -> None:
         format="%(levelname)s: %(message)s",
         stream=sys.stderr,
     )
-    settings = Settings()
+    settings = PostgresSettings()
     app = build_app(settings)
     app.run(transport="streamable-http")
 

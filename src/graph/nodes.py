@@ -8,8 +8,9 @@ import os
 from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
+from pydantic import ValidationError
 
-from config import Settings
+from config import MCPSettings
 from graph.state import GraphState
 
 logger = logging.getLogger(__name__)
@@ -21,7 +22,7 @@ def _graph_debug() -> bool:
     return os.environ.get("GRAPH_DEBUG", "").lower() in ("1", "true", "yes")
 
 
-def _mcp_streamable_http_url(settings: Settings) -> str:
+def _mcp_streamable_http_url(settings: MCPSettings) -> str:
     """URL for MultiServerMCPClient (streamable HTTP ``/mcp``)."""
     if settings.mcp_server_url:
         return settings.mcp_server_url.strip().rstrip("/")
@@ -30,30 +31,39 @@ def _mcp_streamable_http_url(settings: Settings) -> str:
     return f"http://{connect_host}:{settings.mcp_port}/mcp"
 
 
+def _json_object_from_text(raw_text: str) -> dict[str, Any] | None:
+    """Parse a JSON object from text.
+
+    Returns ``None`` for non-objects/invalid JSON.
+    """
+    try:
+        parsed: Any = json.loads(raw_text)
+    except json.JSONDecodeError:
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _text_from_mcp_content_blocks(raw: list[Any]) -> str | None:
+    """Extract concatenated ``text`` values from MCP content blocks when present."""
+    parts = [
+        str(block.get("text", ""))
+        for block in raw
+        if isinstance(block, dict) and block.get("type") == "text"
+    ]
+    return "".join(parts) if parts else None
+
+
 def _tool_result_to_dict(raw: Any) -> dict[str, Any] | None:
     """Normalize LangChain MCP tool output to a dict when possible."""
     if isinstance(raw, dict):
         return raw
-    if isinstance(raw, list):
-        parts: list[str] = []
-        for block in raw:
-            if isinstance(block, dict) and block.get("type") == "text":
-                parts.append(str(block.get("text", "")))
-        if parts:
-            combined = "".join(parts)
-            try:
-                parsed: Any = json.loads(combined)
-            except json.JSONDecodeError:
-                return None
-            if isinstance(parsed, dict):
-                return parsed
-            return None
     if isinstance(raw, str):
-        try:
-            p = json.loads(raw)
-            return p if isinstance(p, dict) else None
-        except json.JSONDecodeError:
+        return _json_object_from_text(raw)
+    if isinstance(raw, list):
+        combined = _text_from_mcp_content_blocks(raw)
+        if combined is None:
             return None
+        return _json_object_from_text(combined)
     return None
 
 
@@ -64,7 +74,31 @@ def _user_input_preview(state: GraphState, *, max_len: int = 120) -> str:
     return raw[: max_len - 3] + "..."
 
 
-async def get_mcp_client(settings: Settings) -> MultiServerMCPClient:
+def _format_settings_validation_error(exc: ValidationError) -> str:
+    """Make config errors actionable without leaking sensitive values."""
+    fields: list[str] = []
+    for err in exc.errors():
+        loc = err.get("loc")
+        if isinstance(loc, (tuple, list)) and loc:
+            head = loc[0]
+            if isinstance(head, str):
+                fields.append(head)
+        elif isinstance(loc, str):
+            fields.append(loc)
+
+    unique = sorted({f for f in fields if f})
+    if unique:
+        return (
+            "Configuration error: invalid or missing settings for "
+            f"{', '.join(unique)}. Set them via environment variables or .env."
+        )
+    return (
+        "Configuration error: invalid or missing settings. "
+        "Check environment variables or .env."
+    )
+
+
+async def get_mcp_client(settings: MCPSettings) -> MultiServerMCPClient:
     """Build an MCP client pointed at ``Settings.mcp_server_url`` (or host/port)."""
     url = _mcp_streamable_http_url(settings)
     return MultiServerMCPClient(
@@ -75,7 +109,6 @@ async def get_mcp_client(settings: Settings) -> MultiServerMCPClient:
 async def query_stub(state: GraphState) -> dict[str, Any]:
     """Run a fixed safe SELECT via MCP ``execute_readonly_sql``."""
     steps = list(state.get("steps", []))
-    settings = Settings()
 
     logger.info(
         "graph_node_transition",
@@ -97,9 +130,10 @@ async def query_stub(state: GraphState) -> dict[str, Any]:
         )
 
     steps.append("query_stub")
-    out: dict[str, Any] = {"steps": steps, "last_error": None}
+    out: dict[str, Any] = {"steps": steps, "last_error": None, "last_result": None}
 
     try:
+        settings = MCPSettings()
         client = await get_mcp_client(settings)
         tools = await client.get_tools()
         exec_tool = next((t for t in tools if t.name == "execute_readonly_sql"), None)
@@ -157,6 +191,18 @@ async def query_stub(state: GraphState) -> dict[str, Any]:
                     "result_summary": f"mcp_error_type={err_type}",
                 },
             )
+    except ValidationError as exc:
+        out["last_error"] = _format_settings_validation_error(exc)
+        logger.info(
+            "graph_node_transition",
+            extra={
+                "graph_node": "query_stub",
+                "graph_phase": "exit",
+                "mcp_status": "error",
+                "steps_count": len(steps),
+                "result_summary": "settings_validation_error",
+            },
+        )
     except OSError as exc:
         out["last_error"] = f"MCP connection error: {type(exc).__name__}"
         logger.info(

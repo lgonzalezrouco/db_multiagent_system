@@ -61,6 +61,7 @@ known-first-party = ["config", "db_multiagent_system", "graph", "mcp_server", "u
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+testpaths = ["tests"]
 markers = [
     "integration: needs Postgres (see README)",
 ]

@@ -14,7 +14,7 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from config import Settings
+from config import MCPSettings
 from graph import get_compiled_graph
 
 logger = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ def _dump(label: str, data: dict[str, Any]) -> None:
 
 async def run_async() -> int:
     try:
-        Settings()
+        MCPSettings()
     except ValidationError as exc:
         logger.error("Configuration error: %s", exc)
         return 1
