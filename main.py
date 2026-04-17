@@ -2,7 +2,7 @@ import logging
 import sys
 
 from db_multiagent_system import bootstrap
-from db_multiagent_system.mcp_demo import run as run_mcp_demo
+from db_multiagent_system.graph_demo import run as run_graph_demo
 
 
 def main() -> int:
@@ -13,7 +13,7 @@ def main() -> int:
     code = bootstrap.run()
     if code != 0:
         return code
-    return run_mcp_demo()
+    return run_graph_demo()
 
 
 if __name__ == "__main__":
