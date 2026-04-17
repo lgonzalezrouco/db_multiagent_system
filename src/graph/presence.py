@@ -5,18 +5,22 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, NamedTuple, Protocol, runtime_checkable
+
+
+class SchemaPresenceResult(NamedTuple):
+    """Snapshot from a single presence evaluation (thread-safe: no shared state)."""
+
+    ready: bool
+    reason: str | None
 
 
 @runtime_checkable
 class SchemaPresence(Protocol):
     """True if persisted schema documentation exists for the query agent."""
 
-    def is_ready(self) -> bool:
-        """Return whether schema docs are available for the query path."""
-
-    def reason(self) -> str | None:
-        """Optional short debug string (e.g. missing file, invalid json)."""
+    def check(self) -> SchemaPresenceResult:
+        """Return readiness and an optional debug reason in one call."""
 
 
 def _repo_root() -> Path:
@@ -34,7 +38,6 @@ class FileSchemaPresence:
 
     def __init__(self, path: Path) -> None:
         self._path = path
-        self._last_reason: str | None = None
 
     @property
     def path(self) -> Path:
@@ -46,32 +49,22 @@ class FileSchemaPresence:
         path = Path(raw).expanduser() if raw else default_schema_presence_path()
         return cls(path)
 
-    def reason(self) -> str | None:
-        return self._last_reason
-
-    def is_ready(self) -> bool:
-        self._last_reason = None
+    def check(self) -> SchemaPresenceResult:
         if not self._path.is_file():
-            self._last_reason = "missing file"
-            return False
+            return SchemaPresenceResult(False, "missing file")
         try:
             raw = self._path.read_text(encoding="utf-8")
         except OSError as exc:
-            self._last_reason = f"read error: {type(exc).__name__}"
-            return False
+            return SchemaPresenceResult(False, f"read error: {type(exc).__name__}")
         try:
             data: Any = json.loads(raw)
         except json.JSONDecodeError:
-            self._last_reason = "invalid json"
-            return False
+            return SchemaPresenceResult(False, "invalid json")
         if not isinstance(data, dict):
-            self._last_reason = "not a json object"
-            return False
+            return SchemaPresenceResult(False, "not a json object")
         version = data.get("version")
         if version != 1:
-            self._last_reason = f"unsupported version: {version!r}"
-            return False
+            return SchemaPresenceResult(False, f"unsupported version: {version!r}")
         if data.get("ready") is not True:
-            self._last_reason = "ready is not true"
-            return False
-        return True
+            return SchemaPresenceResult(False, "ready is not true")
+        return SchemaPresenceResult(True, None)

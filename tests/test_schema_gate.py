@@ -10,7 +10,7 @@ from typing import Any
 import pytest
 
 from graph import get_compiled_graph
-from graph.presence import FileSchemaPresence
+from graph.presence import FileSchemaPresence, SchemaPresenceResult
 from tests.schema_presence_stubs import NotReadySchemaPresence, ReadySchemaPresence
 
 
@@ -111,14 +111,12 @@ def test_file_schema_presence_ready(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     presence = FileSchemaPresence(path)
-    assert presence.is_ready() is True
-    assert presence.reason() is None
+    assert presence.check() == SchemaPresenceResult(True, None)
 
 
 def test_file_schema_presence_missing(tmp_path: Path) -> None:
     presence = FileSchemaPresence(tmp_path / "nope.json")
-    assert presence.is_ready() is False
-    assert presence.reason() == "missing file"
+    assert presence.check() == SchemaPresenceResult(False, "missing file")
 
 
 @pytest.mark.asyncio

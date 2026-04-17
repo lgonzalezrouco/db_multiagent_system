@@ -2,22 +2,18 @@
 
 from __future__ import annotations
 
+from graph.presence import SchemaPresenceResult
+
 
 class ReadySchemaPresence:
     """Treat persisted schema documentation as present (query path)."""
 
-    def is_ready(self) -> bool:
-        return True
-
-    def reason(self) -> str | None:
-        return None
+    def check(self) -> SchemaPresenceResult:
+        return SchemaPresenceResult(True, None)
 
 
 class NotReadySchemaPresence:
     """Treat schema documentation as absent (schema stub path)."""
 
-    def is_ready(self) -> bool:
-        return False
-
-    def reason(self) -> str | None:
-        return "unit tests: schema docs absent"
+    def check(self) -> SchemaPresenceResult:
+        return SchemaPresenceResult(False, "unit tests: schema docs absent")

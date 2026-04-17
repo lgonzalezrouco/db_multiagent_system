@@ -23,7 +23,8 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     resolved: SchemaPresence = presence or FileSchemaPresence.from_env()
 
     def route_after_start(_state: GraphState) -> str:
-        ready = resolved.is_ready()
+        presence_result = resolved.check()
+        ready = presence_result.ready
         decision = "query_path" if ready else "schema_path"
         logger.info(
             "graph_gate_decision",
@@ -31,7 +32,7 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
                 "graph_phase": "gate",
                 "gate_decision": decision,
                 "schema_ready": ready,
-                "presence_reason": resolved.reason(),
+                "presence_reason": presence_result.reason,
             },
         )
         if _graph_debug() and isinstance(resolved, FileSchemaPresence):

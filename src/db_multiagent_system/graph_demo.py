@@ -16,7 +16,7 @@ from pydantic import ValidationError
 
 from config import MCPSettings
 from graph import get_compiled_graph
-from graph.presence import SchemaPresence
+from graph.presence import SchemaPresence, SchemaPresenceResult
 
 logger = logging.getLogger(__name__)
 
@@ -24,11 +24,11 @@ logger = logging.getLogger(__name__)
 class _GraphDemoQueryPathPresence:
     """Force the query branch so this demo exercises ``execute_readonly_sql``."""
 
-    def is_ready(self) -> bool:
-        return True
-
-    def reason(self) -> str | None:
-        return "graph_demo: force query path (marker file optional)"
+    def check(self) -> SchemaPresenceResult:
+        return SchemaPresenceResult(
+            True,
+            "graph_demo: force query path (marker file optional)",
+        )
 
 
 def _print_section(title: str) -> None:
