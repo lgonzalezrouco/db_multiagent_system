@@ -41,8 +41,13 @@ async def test_streamable_http_lists_tools(monkeypatch: pytest.MonkeyPatch) -> N
     )
     server = uvicorn.Server(config)
     task: asyncio.Task[None] = asyncio.create_task(server.serve())
+
+    async def _wait_for_server_started() -> None:
+        while not server.started:
+            await asyncio.sleep(0.01)
+
     try:
-        await asyncio.sleep(0.4)
+        await asyncio.wait_for(_wait_for_server_started(), timeout=10.0)
         url = f"http://127.0.0.1:{port}/mcp"
         client = MultiServerMCPClient(
             {"dvd": {"transport": "http", "url": url}},
