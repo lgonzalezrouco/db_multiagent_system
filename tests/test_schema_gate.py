@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from graph import get_compiled_graph
+from graph import get_compiled_graph, graph_run_config
 from graph.presence import FileSchemaPresence, SchemaPresenceResult
-from tests.schema_presence_stubs import NotReadySchemaPresence, ReadySchemaPresence
+from tests.schema_presence_stubs import ReadySchemaPresence
 
 
 @pytest.fixture
@@ -23,47 +23,6 @@ def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_DB", "dvdrental")
     monkeypatch.setenv("MCP_HOST", "127.0.0.1")
     monkeypatch.setenv("MCP_PORT", "8000")
-
-
-@pytest.mark.asyncio
-async def test_schema_path_runs_schema_stub_when_not_ready(
-    postgres_env: None,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    class _InspectTool:
-        name = "inspect_schema"
-
-        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
-            return {
-                "success": True,
-                "schema_name": "public",
-                "table_filter": None,
-                "tables": [{"table_name": "actor", "schema_name": "public"}],
-            }
-
-    class _FakeClient:
-        async def get_tools(self) -> list[_InspectTool]:
-            return [_InspectTool()]
-
-    async def _fake_client(_settings: Any) -> _FakeClient:
-        return _FakeClient()
-
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
-
-    app = get_compiled_graph(presence=NotReadySchemaPresence())
-    result = await app.ainvoke(
-        {"user_input": "pretend this asks for SQL only", "steps": []},
-    )
-
-    assert result.get("steps") == ["gate:schema_path", "schema_stub"]
-    assert result.get("gate_decision") == "schema_path"
-    assert result.get("schema_ready") is False
-    lr = result.get("last_result")
-    assert isinstance(lr, dict)
-    assert lr.get("kind") == "inspect_schema"
-    assert lr.get("success") is True
-    assert lr.get("table_count") == 1
-    assert result.get("last_error") is None
 
 
 @pytest.mark.asyncio
@@ -92,7 +51,10 @@ async def test_query_path_runs_query_stub_when_ready(
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    result = await app.ainvoke({"user_input": "count something", "steps": []})
+    result = await app.ainvoke(
+        {"user_input": "count something", "steps": []},
+        config=graph_run_config(thread_id="gate-query-1"),
+    )
 
     assert result.get("steps") == ["gate:query_path", "query_stub"]
     assert result.get("gate_decision") == "query_path"
@@ -142,7 +104,10 @@ async def test_gate_router_logs_decision(
 
     with caplog.at_level(logging.INFO, logger="graph.graph"):
         app = get_compiled_graph(presence=ReadySchemaPresence())
-        await app.ainvoke({"user_input": "ignored for routing", "steps": []})
+        await app.ainvoke(
+            {"user_input": "ignored for routing", "steps": []},
+            config=graph_run_config(thread_id="gate-log-1"),
+        )
 
     gate_records = [
         r

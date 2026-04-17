@@ -1,8 +1,30 @@
+import asyncio
 import logging
+import os
 import sys
+from pathlib import Path
 
 from db_multiagent_system import bootstrap
-from db_multiagent_system.graph_demo import run as run_graph_demo
+from db_multiagent_system.graph_demo import run_async as run_graph_demo_async
+from db_multiagent_system.schema_export import export_schema_catalog_json
+
+
+def _schema_export_path() -> Path:
+    raw = os.environ.get("SCHEMA_EXPORT_PATH", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    repo_root = Path(__file__).resolve().parent
+    return repo_root / "data" / "schema_catalog.json"
+
+
+async def _main_async() -> int:
+    out_path = _schema_export_path()
+    try:
+        await export_schema_catalog_json(out_path)
+    except Exception as exc:
+        logging.getLogger(__name__).error("Schema JSON export failed: %s", exc)
+        return 1
+    return await run_graph_demo_async()
 
 
 def main() -> int:
@@ -13,7 +35,7 @@ def main() -> int:
     code = bootstrap.run()
     if code != 0:
         return code
-    return run_graph_demo()
+    return asyncio.run(_main_async())
 
 
 if __name__ == "__main__":
