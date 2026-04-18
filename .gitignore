@@ -15,9 +15,10 @@ wheels/
 # .env files
 .env
 
-# Schema gate marker
-data/schema_presence.json
+# Data files
+data/
 
 # Local guidance
 SPEC-HINT.md
 EXAMPLES/
+spec_prompt.txt
