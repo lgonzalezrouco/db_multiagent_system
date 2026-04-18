@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -97,16 +96,18 @@ async def test_critic_retry_then_success(
             return "SELECT COUNT(*) FROM public.actor"
         return "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10"
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
     monkeypatch.setattr("graph.query_pipeline.build_sql", _build_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="query-retry-1")
     result = await app.ainvoke(
-        {"user_input": "count actors", "steps": []},
-        config=graph_run_config(thread_id="query-retry-1"),
+        {"user_input": "count actors", "steps": [], **state_seed},
+        config=cfg,
     )
 
     assert result.get("steps") == [
+        "memory_load_user",
         "gate:query_path",
         "query_load_context",
         "query_plan",
@@ -116,6 +117,7 @@ async def test_critic_retry_then_success(
         "query_critic",
         "query_execute",
         "query_explain",
+        "memory_update_session",
     ]
     assert int(result.get("refinement_count") or 0) == 1
     lr = result.get("last_result")
@@ -152,16 +154,18 @@ async def test_refinement_cap_skips_mcp_execute(
     ) -> str:
         return "SELECT 1"
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
     monkeypatch.setattr("graph.query_pipeline.build_sql", _bad_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="query-cap-1")
     result = await app.ainvoke(
-        {"user_input": "never lands", "steps": []},
-        config=graph_run_config(thread_id="query-cap-1"),
+        {"user_input": "never lands", "steps": [], **state_seed},
+        config=cfg,
     )
 
     assert result.get("steps") == [
+        "memory_load_user",
         "gate:query_path",
         "query_load_context",
         "query_plan",
@@ -172,6 +176,7 @@ async def test_refinement_cap_skips_mcp_execute(
         "query_generate_sql",
         "query_critic",
         "query_refine_cap",
+        "memory_update_session",
     ]
     assert result.get("last_error") == (
         "Critic rejected SQL after max refinement attempts."
@@ -183,10 +188,8 @@ async def test_refinement_cap_skips_mcp_execute(
 async def test_missing_schema_docs_sets_warning(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    missing = tmp_path / "no_schema_docs_here.json"
-    monkeypatch.setenv("SCHEMA_DOCS_PATH", str(missing))
+    """schema_docs_warning is set when no approved docs are in app_memory."""
 
     class _FakeTool:
         name = "execute_readonly_sql"
@@ -206,12 +209,32 @@ async def test_missing_schema_docs_sets_warning(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    # Patch memory stores so preferences load cleanly but schema docs are absent
+    class _EmptyPrefsStore:
+        def __init__(self, settings=None):
+            pass
+
+        def get(self, user_id: str) -> dict:
+            from memory.preferences import default_preferences
+
+            return default_preferences()
+
+    class _NoSchemaDocsStore:
+        def __init__(self, settings=None):
+            pass
+
+        def get_payload(self):
+            return None
+
+    monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _EmptyPrefsStore)
+    monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _NoSchemaDocsStore)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="query-docs-1")
     result = await app.ainvoke(
-        {"user_input": "smoke", "steps": []},
-        config=graph_run_config(thread_id="query-docs-1"),
+        {"user_input": "smoke", "steps": [], **state_seed},
+        config=cfg,
     )
 
     warn = result.get("schema_docs_warning")
@@ -249,12 +272,13 @@ async def test_query_explain_uses_mcp_error_message(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1")
     result = await app.ainvoke(
-        {"user_input": "broken query path", "steps": []},
-        config=graph_run_config(thread_id="query-mcp-err-1"),
+        {"user_input": "broken query path", "steps": [], **state_seed},
+        config=cfg,
     )
 
     assert result.get("last_error") == expected_msg

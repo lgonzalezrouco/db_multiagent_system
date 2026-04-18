@@ -1,15 +1,13 @@
-"""Spec 05: schema pipeline HITL interrupt/resume, persist, presence."""
+"""Spec 05/07: schema pipeline HITL interrupt/resume, persist via DB store."""
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any
 
 import pytest
 from langgraph.types import Command
 
-from graph import FileSchemaPresence, get_compiled_graph, graph_run_config
+from graph import get_compiled_graph, graph_run_config
 from tests.schema_presence_stubs import NotReadySchemaPresence
 
 
@@ -30,16 +28,31 @@ def _state_dict(out: Any) -> dict[str, Any]:
     return dict(out.value)
 
 
+class _FakeSchemaDocsStore:
+    """In-memory SchemaDocsStore stub that captures upsert_approved calls."""
+
+    captured: list[dict[str, Any]]
+
+    def __init__(self, settings=None) -> None:
+        pass
+
+    def upsert_approved(
+        self,
+        payload: dict[str, Any],
+        metadata_fingerprint: str | None = None,
+    ) -> None:
+        _FakeSchemaDocsStore.captured.append(
+            {"payload": payload, "fingerprint": metadata_fingerprint}
+        )
+
+
 @pytest.mark.asyncio
 async def test_schema_path_interrupt_resume_persist(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    docs = tmp_path / "schema_docs.json"
-    marker = tmp_path / "schema_presence.json"
-    monkeypatch.setenv("SCHEMA_DOCS_PATH", str(docs))
-    monkeypatch.setenv("SCHEMA_PRESENCE_PATH", str(marker))
+    _FakeSchemaDocsStore.captured = []
+    monkeypatch.setattr("graph.schema_pipeline.SchemaDocsStore", _FakeSchemaDocsStore)
 
     class _InspectTool:
         name = "inspect_schema"
@@ -65,9 +78,9 @@ async def test_schema_path_interrupt_resume_persist(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
-    cfg = graph_run_config(thread_id="schema-hitl-unit-1")
+    cfg, _ = graph_run_config(thread_id="schema-hitl-unit-1")
     app = get_compiled_graph(presence=NotReadySchemaPresence())
 
     out1 = await app.ainvoke(
@@ -116,26 +129,20 @@ async def test_schema_path_interrupt_resume_persist(
     assert final.get("last_error") is None
     assert final.get("persist_error") is None
 
-    assert docs.is_file()
-    loaded = json.loads(docs.read_text(encoding="utf-8"))
-    assert loaded.get("version") == 1
-    assert loaded.get("source") == "schema_agent_hitl"
-    assert loaded.get("tables") == resume_tables
-
-    presence = FileSchemaPresence(marker)
-    assert presence.check().ready is True
+    assert len(_FakeSchemaDocsStore.captured) == 1
+    stored = _FakeSchemaDocsStore.captured[0]["payload"]
+    assert stored.get("version") == 1
+    assert stored.get("source") == "schema_agent_hitl"
+    assert stored.get("tables") == resume_tables
 
 
 @pytest.mark.asyncio
 async def test_inspect_schema_called_once_across_hitl_resume(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
-    tmp_path: Path,
 ) -> None:
-    docs = tmp_path / "docs.json"
-    marker = tmp_path / "marker.json"
-    monkeypatch.setenv("SCHEMA_DOCS_PATH", str(docs))
-    monkeypatch.setenv("SCHEMA_PRESENCE_PATH", str(marker))
+    _FakeSchemaDocsStore.captured = []
+    monkeypatch.setattr("graph.schema_pipeline.SchemaDocsStore", _FakeSchemaDocsStore)
 
     calls: list[int] = []
 
@@ -164,9 +171,9 @@ async def test_inspect_schema_called_once_across_hitl_resume(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
-    cfg = graph_run_config(thread_id="schema-hitl-unit-2")
+    cfg, _ = graph_run_config(thread_id="schema-hitl-unit-2")
     app = get_compiled_graph(presence=NotReadySchemaPresence())
     await app.ainvoke({"user_input": "", "steps": []}, config=cfg, version="v2")
     await app.ainvoke(

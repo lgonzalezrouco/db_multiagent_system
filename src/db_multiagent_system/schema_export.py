@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from config import MCPSettings
-from graph.nodes import _tool_result_to_dict, get_mcp_client
+from graph.mcp_helpers import get_mcp_client, tool_result_to_dict
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ async def export_schema_catalog_json(dest: Path) -> None:
     raw: Any = await inspect_tool.ainvoke(
         {"schema_name": "public", "table_name": None},
     )
-    payload = _tool_result_to_dict(raw)
+    payload = tool_result_to_dict(raw)
     if not isinstance(payload, dict):
         raise RuntimeError("inspect_schema did not return a JSON object")
     dest.parent.mkdir(parents=True, exist_ok=True)

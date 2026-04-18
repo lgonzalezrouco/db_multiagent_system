@@ -53,14 +53,13 @@ async def run_async() -> int:
     _print_section("LangGraph shell — compile and ainvoke (query pipeline → MCP SQL)")
     presence: SchemaPresence = _GraphDemoQueryPathPresence()
     app = get_compiled_graph(presence=presence)
+    cfg, state_seed = graph_run_config(thread_id="graph-demo-query")
     initial: GraphState = {
         "user_input": "graph shell demo: count actors via MCP",
         "steps": [],
+        **state_seed,
     }
-    result = await app.ainvoke(
-        initial,
-        config=graph_run_config(thread_id="graph-demo-query"),
-    )
+    result = await app.ainvoke(initial, config=cfg)
     _dump("Graph result:", dict(result))
 
     last_error = result.get("last_error")

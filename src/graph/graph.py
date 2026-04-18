@@ -10,7 +10,9 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
-from graph.presence import FileSchemaPresence, SchemaPresence
+from config.memory_settings import AppMemorySettings
+from graph.memory_nodes import memory_load_user, memory_update_session
+from graph.presence import DbSchemaPresence, SchemaPresence
 from graph.query_pipeline import (
     query_critic,
     query_execute,
@@ -32,9 +34,25 @@ from graph.state import GraphState
 logger = logging.getLogger(__name__)
 
 
-def graph_run_config(*, thread_id: str = "default-thread") -> RunnableConfig:
-    """``config`` for ``invoke`` / ``ainvoke`` (checkpointer requires ``thread_id``)."""
-    return {"configurable": {"thread_id": thread_id}}
+def graph_run_config(
+    *,
+    thread_id: str | None = None,
+    user_id: str | None = None,
+    session_id: str | None = None,
+) -> tuple[RunnableConfig, dict]:
+    """Return (config, initial_state_overrides) for invoke/ainvoke.
+
+    thread_id goes into configurable (required by MemorySaver).
+    user_id goes into initial state so routing never reads from configurable.
+    session_id defaults to thread_id for an optional display/logging label.
+    """
+    s = AppMemorySettings()
+    tid = thread_id or s.default_thread_id
+    uid = user_id or s.default_user_id
+    sid = session_id if session_id is not None else tid
+    config: RunnableConfig = {"configurable": {"thread_id": tid}}
+    state_seed: dict = {"user_id": uid, "session_id": sid}
+    return config, state_seed
 
 
 def _graph_debug() -> bool:
@@ -42,8 +60,8 @@ def _graph_debug() -> bool:
 
 
 def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
-    """Build workflow with conditional routing from ``START``"""
-    resolved: SchemaPresence = presence or FileSchemaPresence.from_env()
+    """Build workflow with conditional routing from ``START``."""
+    resolved: SchemaPresence = presence or DbSchemaPresence.from_settings()
 
     def route_after_start(_state: GraphState) -> str:
         presence_result = resolved.check()
@@ -58,21 +76,18 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
                 "presence_reason": presence_result.reason,
             },
         )
-        if _graph_debug() and isinstance(resolved, FileSchemaPresence):
-            logger.debug(
-                "graph_gate_debug",
-                extra={
-                    "graph_phase": "gate_debug",
-                    "schema_presence_path": str(resolved.path),
-                },
-            )
         return decision
 
     workflow: StateGraph = StateGraph(GraphState)
+
+    # Schema path nodes
     workflow.add_node("schema_inspect", schema_inspect)
     workflow.add_node("schema_draft", schema_draft)
     workflow.add_node("schema_hitl", schema_hitl)
     workflow.add_node("schema_persist", schema_persist)
+
+    # Query path nodes
+    workflow.add_node("memory_load_user", memory_load_user)
     workflow.add_node("query_load_context", query_load_context)
     workflow.add_node("query_plan", query_plan)
     workflow.add_node("query_generate_sql", query_generate_sql)
@@ -80,19 +95,25 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     workflow.add_node("query_execute", query_execute)
     workflow.add_node("query_explain", query_explain)
     workflow.add_node("query_refine_cap", query_refine_cap)
+    workflow.add_node("memory_update_session", memory_update_session)
+
     workflow.add_conditional_edges(
         START,
         route_after_start,
         {
             "schema_path": "schema_inspect",
-            "query_path": "query_load_context",
+            "query_path": "memory_load_user",
         },
     )
+
+    # Schema path edges
     workflow.add_edge("schema_inspect", "schema_draft")
     workflow.add_edge("schema_draft", "schema_hitl")
     workflow.add_edge("schema_hitl", "schema_persist")
     workflow.add_edge("schema_persist", END)
 
+    # Query path edges
+    workflow.add_edge("memory_load_user", "query_load_context")
     workflow.add_edge("query_load_context", "query_plan")
     workflow.add_edge("query_plan", "query_generate_sql")
     workflow.add_edge("query_generate_sql", "query_critic")
@@ -106,8 +127,10 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
         },
     )
     workflow.add_edge("query_execute", "query_explain")
-    workflow.add_edge("query_explain", END)
-    workflow.add_edge("query_refine_cap", END)
+    workflow.add_edge("query_explain", "memory_update_session")
+    workflow.add_edge("query_refine_cap", "memory_update_session")
+    workflow.add_edge("memory_update_session", END)
+
     return workflow
 
 

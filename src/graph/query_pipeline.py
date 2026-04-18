@@ -2,19 +2,16 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import ValidationError
 
 from agents.query_agent import build_query_plan, build_sql
 from config import MCPSettings
-from graph import nodes as graph_nodes
-from graph.schema_paths import schema_docs_path_from_env
+from graph import mcp_helpers
 from graph.state import GraphState
 from mcp_server.readonly_sql import (
     mask_sql_for_analysis,
@@ -75,12 +72,12 @@ async def query_load_context(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_load_context",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "gate_decision": gate_decision,
         },
     )
-    if graph_nodes._graph_debug():
+    if mcp_helpers.graph_debug():
         logger.debug(
             "graph_node_debug_snapshot",
             extra={
@@ -90,25 +87,8 @@ async def query_load_context(state: GraphState) -> dict[str, Any]:
             },
         )
 
-    path = schema_docs_path_from_env()
-    schema_docs_context: dict[str, Any] | None = None
-    schema_docs_warning: str | None = None
-
-    try:
-        if not Path(path).is_file():
-            schema_docs_warning = f"Schema docs file not found at {path}"
-        else:
-            raw_text = Path(path).read_text(encoding="utf-8")
-            try:
-                parsed: Any = json.loads(raw_text)
-            except json.JSONDecodeError as exc:
-                schema_docs_warning = f"Invalid JSON in schema docs ({exc.msg})"
-            else:
-                schema_docs_context = parsed if isinstance(parsed, dict) else None
-                if schema_docs_context is None:
-                    schema_docs_warning = "Schema docs JSON must be an object"
-    except OSError as exc:
-        schema_docs_warning = f"Could not read schema docs: {type(exc).__name__}"
+    schema_docs_context: dict[str, Any] | None = state.get("schema_docs_context")
+    schema_docs_warning: str | None = state.get("schema_docs_warning")
 
     logger.info(
         "graph_node_transition",
@@ -148,7 +128,7 @@ async def query_plan(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_plan",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
         },
     )
@@ -179,7 +159,7 @@ async def query_generate_sql(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_generate_sql",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "refinement_count": int(state.get("refinement_count") or 0),
         },
@@ -217,7 +197,7 @@ async def query_critic(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_critic",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "sql_preview": sql_preview,
         },
@@ -272,7 +252,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_execute",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "sql_preview": truncate_sql_preview(str(sql)),
         },
@@ -286,7 +266,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
 
     try:
         settings = MCPSettings()
-        client = await graph_nodes.get_mcp_client(settings)
+        client = await mcp_helpers.get_mcp_client(settings)
         tools = await client.get_tools()
         exec_tool = next((t for t in tools if t.name == "execute_readonly_sql"), None)
         if exec_tool is None:
@@ -304,7 +284,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
             return out
 
         raw = await exec_tool.ainvoke({"sql": sql})
-        payload = graph_nodes._tool_result_to_dict(raw)
+        payload = mcp_helpers.tool_result_to_dict(raw)
         out["query_execution_result"] = payload
 
         if isinstance(payload, dict) and payload.get("success"):
@@ -337,7 +317,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
             )
 
     except ValidationError as exc:
-        out["last_error"] = graph_nodes._format_settings_validation_error(exc)
+        out["last_error"] = mcp_helpers.format_settings_validation_error(exc)
         logger.info(
             "graph_node_transition",
             extra={
@@ -396,7 +376,7 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_explain",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
         },
     )
@@ -500,7 +480,7 @@ async def query_refine_cap(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_refine_cap",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "refinement_count": int(state.get("refinement_count") or 0),
         },
@@ -511,7 +491,7 @@ async def query_refine_cap(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "query_refine_cap",
             "graph_phase": "exit",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "refinement_count": int(state.get("refinement_count") or 0),
         },

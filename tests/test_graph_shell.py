@@ -11,6 +11,7 @@ from graph import get_compiled_graph, graph_run_config
 from tests.schema_presence_stubs import ReadySchemaPresence
 
 _QUERY_SUCCESS_STEPS = [
+    "memory_load_user",
     "gate:query_path",
     "query_load_context",
     "query_plan",
@@ -18,6 +19,7 @@ _QUERY_SUCCESS_STEPS = [
     "query_critic",
     "query_execute",
     "query_explain",
+    "memory_update_session",
 ]
 
 
@@ -70,12 +72,13 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="shell-smoke-1")
     result = await app.ainvoke(
-        {"user_input": "ping", "steps": []},
-        config=graph_run_config(thread_id="shell-smoke-1"),
+        {"user_input": "ping", "steps": [], **state_seed},
+        config=cfg,
     )
 
     assert result.get("steps") == _QUERY_SUCCESS_STEPS
@@ -112,12 +115,13 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="shell-smoke-2")
     result = await app.ainvoke(
-        {"user_input": "ping", "steps": []},
-        config=graph_run_config(thread_id="shell-smoke-1"),
+        {"user_input": "ping", "steps": [], **state_seed},
+        config=cfg,
     )
 
     assert result.get("steps") == _QUERY_SUCCESS_STEPS
@@ -148,13 +152,14 @@ async def test_query_pipeline_logs_enter_exit(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     with caplog.at_level(logging.INFO, logger="graph.query_pipeline"):
         app = get_compiled_graph(presence=ReadySchemaPresence())
+        cfg, state_seed = graph_run_config(thread_id="shell-log-1")
         await app.ainvoke(
-            {"user_input": "hello", "steps": []},
-            config=graph_run_config(thread_id="shell-log-1"),
+            {"user_input": "hello", "steps": [], **state_seed},
+            config=cfg,
         )
 
     phases = [
@@ -182,16 +187,18 @@ async def test_query_pipeline_clears_last_result_on_tool_error(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="shell-error-1")
     result = await app.ainvoke(
         {
             "user_input": "ping",
             "steps": [],
             "last_result": {"kind": "query_answer", "sql": "SELECT 1"},
+            **state_seed,
         },
-        config=graph_run_config(thread_id="shell-error-1"),
+        config=cfg,
     )
 
     assert result.get("steps") == _QUERY_SUCCESS_STEPS

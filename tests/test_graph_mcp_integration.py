@@ -55,9 +55,10 @@ async def test_query_pipeline_via_live_mcp_http(
         monkeypatch.setenv("MCP_SERVER_URL", f"http://127.0.0.1:{port}/mcp")
 
         app = get_compiled_graph(presence=ReadySchemaPresence())
+        cfg, state_seed = graph_run_config(thread_id="mcp-integration-1")
         result = await app.ainvoke(
-            {"user_input": "integration", "steps": []},
-            config=graph_run_config(thread_id="mcp-integration-1"),
+            {"user_input": "integration", "steps": [], **state_seed},
+            config=cfg,
         )
 
         if result.get("last_error"):
@@ -75,6 +76,7 @@ async def test_query_pipeline_via_live_mcp_http(
         assert isinstance(lr, dict)
         assert lr.get("kind") == "query_answer"
         assert result.get("steps") == [
+            "memory_load_user",
             "gate:query_path",
             "query_load_context",
             "query_plan",
@@ -82,6 +84,7 @@ async def test_query_pipeline_via_live_mcp_http(
             "query_critic",
             "query_execute",
             "query_explain",
+            "memory_update_session",
         ]
     finally:
         server.should_exit = True

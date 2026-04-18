@@ -1,11 +1,13 @@
-"""Read-only schema documentation readiness (marker file or injectable backend)."""
+"""Schema documentation readiness (injectable backend)."""
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
-from typing import Any, NamedTuple, Protocol, runtime_checkable
+import logging
+from typing import NamedTuple, Protocol, runtime_checkable
+
+import psycopg
+
+logger = logging.getLogger(__name__)
 
 
 class SchemaPresenceResult(NamedTuple):
@@ -23,48 +25,41 @@ class SchemaPresence(Protocol):
         """Return readiness and an optional debug reason in one call."""
 
 
-def _repo_root() -> Path:
-    """``src/graph/presence.py`` → repository root."""
-    return Path(__file__).resolve().parents[2]
+class _SchemaDocsBackend(Protocol):
+    """Structural interface for DbSchemaPresence — any object with is_ready()."""
+
+    def is_ready(self) -> bool: ...
 
 
-def default_schema_presence_path() -> Path:
-    """Default marker path: ``<repo>/data/schema_presence.json``."""
-    return _repo_root() / "data" / "schema_presence.json"
+class DbSchemaPresence:
+    """SchemaPresence implementation backed by app_memory.schema_docs."""
 
-
-class FileSchemaPresence:
-    """JSON marker file: ``{"version": 1, "ready": true, ...}``."""
-
-    def __init__(self, path: Path) -> None:
-        self._path = path
-
-    @property
-    def path(self) -> Path:
-        return self._path
+    def __init__(self, store: _SchemaDocsBackend | None = None, settings=None) -> None:
+        self._store = store
+        self._settings = settings
 
     @classmethod
-    def from_env(cls) -> FileSchemaPresence:
-        raw = os.environ.get("SCHEMA_PRESENCE_PATH", "").strip()
-        path = Path(raw).expanduser() if raw else default_schema_presence_path()
-        return cls(path)
+    def from_settings(cls, settings=None) -> DbSchemaPresence:
+        """Lazy constructor — store is created on first check() call."""
+        return cls(settings=settings)
 
     def check(self) -> SchemaPresenceResult:
-        if not self._path.is_file():
-            return SchemaPresenceResult(False, "missing file")
+        from memory.schema_docs import SchemaDocsStore
+
         try:
-            raw = self._path.read_text(encoding="utf-8")
-        except OSError as exc:
-            return SchemaPresenceResult(False, f"read error: {type(exc).__name__}")
-        try:
-            data: Any = json.loads(raw)
-        except json.JSONDecodeError:
-            return SchemaPresenceResult(False, "invalid json")
-        if not isinstance(data, dict):
-            return SchemaPresenceResult(False, "not a json object")
-        version = data.get("version")
-        if version != 1:
-            return SchemaPresenceResult(False, f"unsupported version: {version!r}")
-        if data.get("ready") is not True:
-            return SchemaPresenceResult(False, "ready is not true")
-        return SchemaPresenceResult(True, None)
+            if self._store is None:
+                self._store = SchemaDocsStore(self._settings)
+            ready = self._store.is_ready()
+        except psycopg.OperationalError as exc:
+            reason = f"app_memory unreachable: {type(exc).__name__}"
+            logger.warning(
+                "schema_presence_db_error",
+                extra={"reason": reason},
+            )
+            return SchemaPresenceResult(ready=False, reason=reason)
+        reason = None if ready else "schema_docs.ready is false or row missing"
+        logger.info(
+            "schema_presence_check",
+            extra={"schema_docs_ready": ready, "reason": reason},
+        )
+        return SchemaPresenceResult(ready=ready, reason=reason)
