@@ -201,7 +201,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
 
 
 async def schema_draft(state: GraphState) -> dict[str, Any]:
-    """Build ``schema_draft`` from ``schema_metadata`` (stub or future LLM)."""
+    """Build ``schema_draft`` from ``schema_metadata`` via structured LLM output."""
     steps = list(state.get("steps", []))
     steps.append("schema_draft")
     logger.info(
@@ -215,7 +215,18 @@ async def schema_draft(state: GraphState) -> dict[str, Any]:
     )
     meta = state.get("schema_metadata")
     meta_dict = meta if isinstance(meta, dict) else None
-    draft = build_schema_draft(meta_dict)
+    raw_prefs = state.get("preferences")
+    prefs = raw_prefs if isinstance(raw_prefs, dict) else None
+    try:
+        draft = await build_schema_draft(
+            meta_dict,
+            user_input=state.get("user_input", "") or "",
+            preferences=prefs,
+        )
+    except Exception as exc:
+        msg = f"Schema draft LLM error: {type(exc).__name__}: {exc}"
+        logger.exception("schema_draft_failed")
+        return {"schema_draft": None, "steps": steps, "last_error": msg}
 
     logger.info(
         "graph_node_transition",

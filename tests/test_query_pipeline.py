@@ -85,11 +85,12 @@ async def test_critic_retry_then_success(
 
     calls: list[int] = []
 
-    def _build_sql(
+    async def _build_sql(
         _ui: str,
         _qp: dict[str, Any] | None,
         _sc: dict[str, Any] | None,
         rc: int,
+        **_kw: Any,
     ) -> str:
         calls.append(rc)
         if rc == 0:
@@ -146,11 +147,12 @@ async def test_refinement_cap_skips_mcp_execute(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    def _bad_sql(
+    async def _bad_sql(
         _ui: str,
         _qp: dict[str, Any] | None,
         _sc: dict[str, Any] | None,
         _rc: int,
+        **_kw: Any,
     ) -> str:
         return "SELECT 1"
 
