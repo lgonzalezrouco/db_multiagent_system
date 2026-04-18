@@ -3,13 +3,14 @@
 from __future__ import annotations
 
 import psycopg
+from psycopg import conninfo
 
 from config.postgres_settings import PostgresSettings
 
 
 def postgres_conninfo(settings: PostgresSettings, *, connect_timeout: int = 10) -> str:
     """Build a libpq connection string from application settings."""
-    return psycopg.conninfo.make_conninfo(
+    return conninfo.make_conninfo(
         host=settings.postgres_host,
         port=settings.postgres_port,
         user=settings.postgres_user,

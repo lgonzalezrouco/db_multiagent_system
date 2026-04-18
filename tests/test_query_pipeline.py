@@ -96,7 +96,7 @@ async def test_critic_retry_then_success(
             return "SELECT COUNT(*) FROM public.actor"
         return "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10"
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
     monkeypatch.setattr("graph.query_pipeline.build_sql", _build_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
@@ -154,7 +154,7 @@ async def test_refinement_cap_skips_mcp_execute(
     ) -> str:
         return "SELECT 1"
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
     monkeypatch.setattr("graph.query_pipeline.build_sql", _bad_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
@@ -228,7 +228,7 @@ async def test_missing_schema_docs_sets_warning(
 
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _EmptyPrefsStore)
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _NoSchemaDocsStore)
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-docs-1")
@@ -272,7 +272,7 @@ async def test_query_explain_uses_mcp_error_message(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1")

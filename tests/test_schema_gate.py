@@ -62,7 +62,7 @@ async def test_query_path_runs_query_pipeline_when_ready(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="gate-query-1")
@@ -79,8 +79,12 @@ async def test_query_path_runs_query_pipeline_when_ready(
     assert lr.get("kind") == "query_answer"
 
 
-def test_db_schema_presence_check_soft_fails_when_db_unreachable() -> None:
+def test_db_schema_presence_check_soft_fails_when_db_unreachable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     """DbSchemaPresence.check() returns ready=False when app_memory is down."""
+    monkeypatch.setenv("APP_MEMORY_HOST", "127.0.0.1")
+    monkeypatch.setenv("APP_MEMORY_PORT", "65535")
     presence = DbSchemaPresence.from_settings()
     result = presence.check()
     assert isinstance(result, SchemaPresenceResult)
@@ -138,7 +142,7 @@ async def test_gate_router_logs_decision(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     with caplog.at_level(logging.INFO, logger="graph.graph"):
         app = get_compiled_graph(presence=ReadySchemaPresence())

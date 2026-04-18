@@ -72,7 +72,7 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-1")
@@ -115,7 +115,7 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-2")
@@ -152,7 +152,7 @@ async def test_query_pipeline_logs_enter_exit(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     with caplog.at_level(logging.INFO, logger="graph.query_pipeline"):
         app = get_compiled_graph(presence=ReadySchemaPresence())
@@ -187,7 +187,7 @@ async def test_query_pipeline_clears_last_result_on_tool_error(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-error-1")

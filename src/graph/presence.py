@@ -47,8 +47,9 @@ class DbSchemaPresence:
         from memory.schema_docs import SchemaDocsStore
 
         try:
-            store = self._store or SchemaDocsStore(self._settings)
-            ready = store.is_ready()
+            if self._store is None:
+                self._store = SchemaDocsStore(self._settings)
+            ready = self._store.is_ready()
         except psycopg.OperationalError as exc:
             reason = f"app_memory unreachable: {type(exc).__name__}"
             logger.warning(

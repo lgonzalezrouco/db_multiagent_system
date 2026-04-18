@@ -78,7 +78,7 @@ async def test_schema_path_interrupt_resume_persist(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     cfg, _ = graph_run_config(thread_id="schema-hitl-unit-1")
     app = get_compiled_graph(presence=NotReadySchemaPresence())
@@ -171,7 +171,7 @@ async def test_inspect_schema_called_once_across_hitl_resume(
     async def _fake_client(_settings: Any) -> _FakeClient:
         return _FakeClient()
 
-    monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     cfg, _ = graph_run_config(thread_id="schema-hitl-unit-2")
     app = get_compiled_graph(presence=NotReadySchemaPresence())

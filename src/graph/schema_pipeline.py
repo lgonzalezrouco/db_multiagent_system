@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from agents.schema_agent import build_schema_draft
 from config import MCPSettings
 from config.memory_settings import AppMemorySettings
-from graph import nodes as graph_nodes
+from graph import mcp_helpers
 from graph.state import GraphState
 from memory.schema_docs import SchemaDocsStore
 
@@ -78,12 +78,12 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "schema_inspect",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
             "gate_decision": gate_decision,
         },
     )
-    if graph_nodes._graph_debug():
+    if mcp_helpers.graph_debug():
         logger.debug(
             "graph_node_debug_snapshot",
             extra={
@@ -104,7 +104,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
 
     try:
         settings = MCPSettings()
-        client = await graph_nodes.get_mcp_client(settings)
+        client = await mcp_helpers.get_mcp_client(settings)
         tools = await client.get_tools()
         inspect_tool = next((t for t in tools if t.name == "inspect_schema"), None)
         if inspect_tool is None:
@@ -123,10 +123,10 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
             return out
 
         raw = await inspect_tool.ainvoke({"schema_name": "public", "table_name": None})
-        payload = graph_nodes._tool_result_to_dict(raw)
+        payload = mcp_helpers.tool_result_to_dict(raw)
         if payload and payload.get("success"):
             out["schema_metadata"] = payload
-            out["last_result"] = graph_nodes._inspect_schema_summary(payload)
+            out["last_result"] = mcp_helpers.inspect_schema_summary(payload)
             logger.info(
                 "graph_node_transition",
                 extra={
@@ -147,7 +147,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
                 if payload
                 else "could not parse MCP tool result"
             )
-            out["last_result"] = graph_nodes._inspect_schema_summary(payload)
+            out["last_result"] = mcp_helpers.inspect_schema_summary(payload)
             out["schema_metadata"] = payload if isinstance(payload, dict) else None
             logger.info(
                 "graph_node_transition",
@@ -160,7 +160,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
                 },
             )
     except ValidationError as exc:
-        out["last_error"] = graph_nodes._format_settings_validation_error(exc)
+        out["last_error"] = mcp_helpers.format_settings_validation_error(exc)
         logger.info(
             "graph_node_transition",
             extra={
@@ -209,7 +209,7 @@ async def schema_draft(state: GraphState) -> dict[str, Any]:
         extra={
             "graph_node": "schema_draft",
             "graph_phase": "enter",
-            "user_input_preview": graph_nodes._user_input_preview(state),
+            "user_input_preview": mcp_helpers.user_input_preview(state),
             "steps_count": len(steps),
         },
     )

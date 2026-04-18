@@ -1,8 +1,8 @@
 # Spec 07 — Memory (persistent preferences + schema docs + short-term session)
 
-**Sources of truth:** [TASK.md](../TASK.md), [AGENTS.md](../AGENTS.md). Build on [specs/01-bootstrap.md](01-bootstrap.md), [specs/02-tools-mcp.md](02-tools-mcp.md), [specs/03-graph-shell.md](03-graph-shell.md), [specs/04-schema-gate.md](04-schema-gate.md), [specs/05-schema-agent-hitl.md](05-schema-agent-hitl.md), and [specs/06-query-agent-critic.md](06-query-agent-critic.md). This spec **replaces the file-based persistence contracts** of Specs 04 §8 and 05 §8 with a PostgreSQL-backed memory store. Nothing is deployed yet, so this is a clean swap with no backward-compatibility shim.
+**Sources of truth:** [TASK.md](../TASK.md), [AGENTS.md](../AGENTS.md). Build on [specs/01-bootstrap.md](01-bootstrap.md), [specs/02-tools-mcp.md](02-tools-mcp.md), [specs/03-graph-shell.md](03-graph-shell.md), [specs/04-schema-gate.md](04-schema-gate.md), [specs/05-schema-agent-hitl.md](05-schema-agent-hitl.md), and [specs/06-query-agent-critic.md](06-query-agent-critic.md). This spec **replaces the file-based persistence contracts** of Specs 04 §8 and 05 §8 with a PostgreSQL-backed memory store—a clean swap with no backward-compatibility shim.
 
-**Spec-only deliverable:** This file defines **requirements, layout, and contracts** for a future implementation. **Application code** is **out of scope** for the act of "landing Spec 07"—implement it in a separate change set using §17 as the checklist.
+**Implementation and contract:** The repository **implements** this spec (`src/memory/`, graph wiring, `docker-compose`, tests). This document is the **design reference and behavioral contract**; use §17 as the checklist for completeness and future changes. It is not a placeholder for code that “does not exist yet.”
 
 ---
 
