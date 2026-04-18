@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import os
 import re
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import ValidationError
@@ -14,7 +12,6 @@ from pydantic import ValidationError
 from agents.query_agent import build_query_plan, build_sql
 from config import MCPSettings
 from graph import nodes as graph_nodes
-from graph.schema_paths import schema_docs_path_from_env
 from graph.state import GraphState
 from mcp_server.readonly_sql import (
     mask_sql_for_analysis,
@@ -90,25 +87,8 @@ async def query_load_context(state: GraphState) -> dict[str, Any]:
             },
         )
 
-    path = schema_docs_path_from_env()
-    schema_docs_context: dict[str, Any] | None = None
-    schema_docs_warning: str | None = None
-
-    try:
-        if not Path(path).is_file():
-            schema_docs_warning = f"Schema docs file not found at {path}"
-        else:
-            raw_text = Path(path).read_text(encoding="utf-8")
-            try:
-                parsed: Any = json.loads(raw_text)
-            except json.JSONDecodeError as exc:
-                schema_docs_warning = f"Invalid JSON in schema docs ({exc.msg})"
-            else:
-                schema_docs_context = parsed if isinstance(parsed, dict) else None
-                if schema_docs_context is None:
-                    schema_docs_warning = "Schema docs JSON must be an object"
-    except OSError as exc:
-        schema_docs_warning = f"Could not read schema docs: {type(exc).__name__}"
+    schema_docs_context: dict[str, Any] | None = state.get("schema_docs_context")
+    schema_docs_warning: str | None = state.get("schema_docs_warning")
 
     logger.info(
         "graph_node_transition",

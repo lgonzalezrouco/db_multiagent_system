@@ -6,7 +6,7 @@ from typing import TypedDict
 
 
 class GraphState(TypedDict, total=False):
-    """LangGraph state: schema gate, schema HITL, and query pipeline fields."""
+    """LangGraph state: schema gate, schema HITL, query pipeline, and memory fields."""
 
     user_input: str
     steps: list[str]
@@ -28,3 +28,15 @@ class GraphState(TypedDict, total=False):
     refinement_count: int
     query_execution_result: dict | None
     query_explanation: str | None
+
+    user_id: str
+    session_id: str | None
+    preferences: dict | None
+    preferences_dirty: bool
+
+    previous_user_input: str | None
+    previous_sql: str | None
+    assumptions: list[str] | None
+    recent_filters: dict | None
+
+    memory_warning: str | None

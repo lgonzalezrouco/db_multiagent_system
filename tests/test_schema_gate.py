@@ -1,17 +1,31 @@
-"""Schema-presence gate: graph branches, file marker, gate logging."""
+"""Schema-presence gate: graph branches, DbSchemaPresence, gate logging."""
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 import pytest
 
-from graph import get_compiled_graph, graph_run_config
-from graph.presence import FileSchemaPresence, SchemaPresenceResult
+from graph import (
+    DbSchemaPresence,
+    SchemaPresenceResult,
+    get_compiled_graph,
+    graph_run_config,
+)
 from tests.schema_presence_stubs import ReadySchemaPresence
+
+_QUERY_SUCCESS_STEPS = [
+    "memory_load_user",
+    "gate:query_path",
+    "query_load_context",
+    "query_plan",
+    "query_generate_sql",
+    "query_critic",
+    "query_execute",
+    "query_explain",
+    "memory_update_session",
+]
 
 
 @pytest.fixture
@@ -51,20 +65,13 @@ async def test_query_path_runs_query_pipeline_when_ready(
     monkeypatch.setattr("graph.nodes.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(thread_id="gate-query-1")
     result = await app.ainvoke(
-        {"user_input": "count something", "steps": []},
-        config=graph_run_config(thread_id="gate-query-1"),
+        {"user_input": "count something", "steps": [], **state_seed},
+        config=cfg,
     )
 
-    assert result.get("steps") == [
-        "gate:query_path",
-        "query_load_context",
-        "query_plan",
-        "query_generate_sql",
-        "query_critic",
-        "query_execute",
-        "query_explain",
-    ]
+    assert result.get("steps") == _QUERY_SUCCESS_STEPS
     assert result.get("gate_decision") == "query_path"
     assert result.get("schema_ready") is True
     lr = result.get("last_result")
@@ -72,21 +79,44 @@ async def test_query_path_runs_query_pipeline_when_ready(
     assert lr.get("kind") == "query_answer"
 
 
-def test_file_schema_presence_ready(tmp_path: Path) -> None:
-    path = tmp_path / "schema_presence.json"
-    path.write_text(
-        json.dumps(
-            {"version": 1, "ready": True, "updated_at": "2026-01-01T00:00:00Z"},
-        ),
-        encoding="utf-8",
-    )
-    presence = FileSchemaPresence(path)
-    assert presence.check() == SchemaPresenceResult(True, None)
+def test_db_schema_presence_check_soft_fails_when_db_unreachable() -> None:
+    """DbSchemaPresence.check() returns ready=False when app_memory is down."""
+    presence = DbSchemaPresence.from_settings()
+    result = presence.check()
+    assert isinstance(result, SchemaPresenceResult)
+    assert result.ready is False
+    assert result.reason is not None
 
 
-def test_file_schema_presence_missing(tmp_path: Path) -> None:
-    presence = FileSchemaPresence(tmp_path / "nope.json")
-    assert presence.check() == SchemaPresenceResult(False, "missing file")
+def test_db_schema_presence_with_ready_store() -> None:
+    """DbSchemaPresence.check() returns ready=True when store reports ready."""
+
+    class _ReadyStore:
+        def __init__(self, settings=None):
+            pass
+
+        def is_ready(self) -> bool:
+            return True
+
+    presence = DbSchemaPresence(store=_ReadyStore())
+    result = presence.check()
+    assert result == SchemaPresenceResult(True, None)
+
+
+def test_db_schema_presence_with_not_ready_store() -> None:
+    """DbSchemaPresence.check() returns ready=False when store reports not ready."""
+
+    class _NotReadyStore:
+        def __init__(self, settings=None):
+            pass
+
+        def is_ready(self) -> bool:
+            return False
+
+    presence = DbSchemaPresence(store=_NotReadyStore())
+    result = presence.check()
+    assert result.ready is False
+    assert result.reason is not None
 
 
 @pytest.mark.asyncio
@@ -112,9 +142,10 @@ async def test_gate_router_logs_decision(
 
     with caplog.at_level(logging.INFO, logger="graph.graph"):
         app = get_compiled_graph(presence=ReadySchemaPresence())
+        cfg, state_seed = graph_run_config(thread_id="gate-log-1")
         await app.ainvoke(
-            {"user_input": "ignored for routing", "steps": []},
-            config=graph_run_config(thread_id="gate-log-1"),
+            {"user_input": "ignored for routing", "steps": [], **state_seed},
+            config=cfg,
         )
 
     gate_records = [

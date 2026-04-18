@@ -36,5 +36,24 @@ services:
       postgres:
         condition: service_healthy
 
+  postgres-app-memory:
+    image: postgres:18
+    container_name: multiagent-app-memory-postgres
+    environment:
+      POSTGRES_DB: app_memory
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: mysecretpassword
+    ports:
+      - "5433:5432"
+    volumes:
+      - app_memory_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d app_memory"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
 volumes:
   postgres_data:
+  app_memory_data:

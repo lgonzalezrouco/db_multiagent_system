@@ -2,43 +2,24 @@
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import logging
-import os
-import tempfile
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
+import psycopg
 from langgraph.types import interrupt
 from pydantic import ValidationError
 
 from agents.schema_agent import build_schema_draft
 from config import MCPSettings
+from config.memory_settings import AppMemorySettings
 from graph import nodes as graph_nodes
-from graph.presence import FileSchemaPresence
-from graph.schema_paths import schema_docs_path_from_env
 from graph.state import GraphState
+from memory.schema_docs import SchemaDocsStore
 
 logger = logging.getLogger(__name__)
-
-
-def write_json_atomic(path: os.PathLike[str] | str, obj: object) -> None:
-    """Write JSON atomically via temp file + ``os.replace``"""
-    dest = Path(path)
-    dest.parent.mkdir(parents=True, exist_ok=True)
-    data = json.dumps(obj, indent=2, ensure_ascii=False).encode("utf-8")
-    fd, tmp = tempfile.mkstemp(prefix=".tmp-", dir=dest.parent)
-    try:
-        with os.fdopen(fd, "wb") as fh:
-            fh.write(data)
-        os.replace(tmp, dest)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
 
 
 def _utc_now_iso() -> str:
@@ -288,13 +269,9 @@ def schema_hitl(state: GraphState) -> dict[str, Any]:
 
 
 def schema_persist(state: GraphState) -> dict[str, Any]:
-    """Write approved docs JSON, then readiness marker"""
+    """Persist approved schema docs to app_memory via SchemaDocsStore."""
     steps = list(state.get("steps", []))
     steps.append("schema_persist")
-
-    docs_path = schema_docs_path_from_env()
-    presence = FileSchemaPresence.from_env()
-    marker_path = presence.path
 
     logger.info(
         "graph_node_transition",
@@ -302,8 +279,6 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
             "graph_node": "schema_persist",
             "graph_phase": "enter",
             "steps_count": len(steps),
-            "schema_docs_path": str(docs_path),
-            "schema_presence_path": str(marker_path),
         },
     )
 
@@ -335,21 +310,34 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
         "tables": tables,
     }
     meta = state.get("schema_metadata")
+    fingerprint: str | None = None
     if isinstance(meta, dict):
-        payload_doc["metadata_fingerprint"] = hashlib.sha256(
+        fingerprint = hashlib.sha256(
             json.dumps(meta, sort_keys=True, default=str).encode("utf-8"),
         ).hexdigest()
 
-    marker_doc: dict[str, Any] = {
-        "version": 1,
-        "ready": True,
-        "updated_at": updated,
-    }
-
     try:
-        write_json_atomic(docs_path, payload_doc)
-    except OSError as exc:
-        msg = f"could not write schema docs: {type(exc).__name__}"
+        store = SchemaDocsStore(AppMemorySettings())
+        store.upsert_approved(payload_doc, metadata_fingerprint=fingerprint)
+        out["schema_ready"] = True
+        out["last_result"] = {
+            "kind": "schema_persist",
+            "success": True,
+            "table_count": len(tables),
+        }
+        out["last_error"] = None
+        logger.info(
+            "graph_node_transition",
+            extra={
+                "graph_node": "schema_persist",
+                "graph_phase": "exit",
+                "mcp_status": "success",
+                "steps_count": len(steps),
+                "result_summary": f"table_count={len(tables)}",
+            },
+        )
+    except psycopg.OperationalError as exc:
+        msg = f"could not persist schema docs: {type(exc).__name__}"
         out["persist_error"] = msg
         out["last_error"] = msg
         out["last_result"] = None
@@ -360,65 +348,8 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
                 "graph_phase": "exit",
                 "mcp_status": "error",
                 "steps_count": len(steps),
-                "result_summary": "docs_write_failed",
+                "result_summary": "db_error",
             },
         )
-        return out
 
-    try:
-        write_json_atomic(marker_path, marker_doc)
-    except OSError as exc:
-        msg = f"schema docs written but marker failed: {type(exc).__name__}"
-        out["persist_error"] = msg
-        out["last_error"] = msg
-        out["last_result"] = {
-            "kind": "schema_persist",
-            "success": False,
-            "docs_path": str(docs_path),
-            "marker_path": str(marker_path),
-        }
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_persist",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "marker_write_failed",
-            },
-        )
-        try:
-            write_json_atomic(
-                marker_path,
-                {"version": 1, "ready": False, "updated_at": _utc_now_iso()},
-            )
-        except OSError:
-            logger.exception(
-                "schema_persist_marker_recovery_failed",
-                extra={
-                    "graph_node": "schema_persist",
-                    "schema_presence_path": str(marker_path),
-                },
-            )
-        return out
-
-    out["last_error"] = None
-    out["last_result"] = {
-        "kind": "schema_persist",
-        "success": True,
-        "docs_path": str(docs_path),
-        "marker_path": str(marker_path),
-        "table_count": len(tables),
-    }
-    out["schema_ready"] = True
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "schema_persist",
-            "graph_phase": "exit",
-            "mcp_status": "success",
-            "steps_count": len(steps),
-            "result_summary": f"table_count={len(tables)}",
-        },
-    )
     return out
