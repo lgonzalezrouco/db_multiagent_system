@@ -42,3 +42,15 @@ def test_create_chat_llm_uses_temperature_override() -> None:
     with patch("llm.factory.ChatLiteLLM") as mocked:
         create_chat_llm(settings, temperature=0.7)
     assert mocked.call_args.kwargs["temperature"] == 0.7
+
+
+def test_create_chat_llm_coerces_gpt5_zero_temperature() -> None:
+    settings = LLMSettings(
+        llm_service_url="http://x/v1",
+        llm_model="gpt-5-nano",
+        llm_api_key="x",
+        llm_temperature=0.0,
+    )
+    with patch("llm.factory.ChatLiteLLM") as mocked:
+        create_chat_llm(settings)
+    assert mocked.call_args.kwargs["temperature"] == 1.0

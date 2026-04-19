@@ -1,4 +1,4 @@
-"""Optional live LiteLLM proxy checks (opt-in; default skip)."""
+"""Live LiteLLM proxy check (needs ``LLM_SERVICE_URL`` / ``LLM_MODEL`` in env)."""
 
 from __future__ import annotations
 
@@ -9,13 +9,8 @@ import pytest
 
 @pytest.mark.asyncio
 @pytest.mark.litellm_integration
-async def test_live_litellm_sql_generation_skips_by_default() -> None:
-    """Run with ``LLM_INTEGRATION=1`` plus valid ``LLM_*`` to exercise a real proxy."""
-    if os.environ.get("LLM_INTEGRATION", "").strip() != "1":
-        pytest.skip(
-            "Set LLM_INTEGRATION=1 and LLM_SERVICE_URL / LLM_MODEL for live test",
-        )
-
+async def test_live_litellm_sql_generation() -> None:
+    """Calls the configured proxy; skips only if required ``LLM_*`` env is missing."""
     required_env_vars = ("LLM_SERVICE_URL", "LLM_MODEL")
     missing_env_vars = [
         name for name in required_env_vars if not os.environ.get(name, "").strip()
