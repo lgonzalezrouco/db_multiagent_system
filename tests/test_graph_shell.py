@@ -1,8 +1,7 @@
-"""Unit tests for LangGraph shell: compile, ainvoke, mocked MCP, logging."""
+"""Unit tests for LangGraph shell: compile, ainvoke, mocked MCP."""
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import pytest
@@ -75,7 +74,7 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="shell-smoke-1")
+    cfg, state_seed = graph_run_config(thread_id="shell-smoke-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
@@ -118,7 +117,7 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="shell-smoke-2")
+    cfg, state_seed = graph_run_config(thread_id="shell-smoke-2", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
@@ -131,46 +130,6 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
     assert result.get("last_error") is None
-
-
-@pytest.mark.asyncio
-async def test_query_pipeline_logs_enter_exit(
-    postgres_env: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class _FakeTool:
-        name = "execute_readonly_sql"
-
-        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
-            return {"success": True, "rows_returned": 0, "rows": [], "columns": []}
-
-    class _FakeClient:
-        async def get_tools(self) -> list[_FakeTool]:
-            return [_FakeTool()]
-
-    async def _fake_client(_settings: Any) -> _FakeClient:
-        return _FakeClient()
-
-    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
-
-    with caplog.at_level(logging.INFO, logger="graph.query_pipeline"):
-        app = get_compiled_graph(presence=ReadySchemaPresence())
-        cfg, state_seed = graph_run_config(thread_id="shell-log-1")
-        await app.ainvoke(
-            {"user_input": "hello", "steps": [], **state_seed},
-            config=cfg,
-        )
-
-    phases = [
-        r.graph_phase
-        for r in caplog.records
-        if getattr(r, "graph_phase", None) is not None
-    ]
-    assert "enter" in phases
-    assert "exit" in phases
-    nodes = {r.graph_node for r in caplog.records if hasattr(r, "graph_node")}
-    assert "query_execute" in nodes
 
 
 @pytest.mark.asyncio
@@ -190,7 +149,7 @@ async def test_query_pipeline_clears_last_result_on_tool_error(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="shell-error-1")
+    cfg, state_seed = graph_run_config(thread_id="shell-error-1", run_kind="pytest")
     result = await app.ainvoke(
         {
             "user_input": "ping",

@@ -80,7 +80,7 @@ async def test_schema_path_interrupt_resume_persist(
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
-    cfg, _ = graph_run_config(thread_id="schema-hitl-unit-1")
+    cfg, _ = graph_run_config(thread_id="schema-hitl-unit-1", run_kind="pytest")
     app = get_compiled_graph(presence=NotReadySchemaPresence())
 
     out1 = await app.ainvoke(
@@ -173,7 +173,7 @@ async def test_inspect_schema_called_once_across_hitl_resume(
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
-    cfg, _ = graph_run_config(thread_id="schema-hitl-unit-2")
+    cfg, _ = graph_run_config(thread_id="schema-hitl-unit-2", run_kind="pytest")
     app = get_compiled_graph(presence=NotReadySchemaPresence())
     await app.ainvoke({"user_input": "", "steps": []}, config=cfg, version="v2")
     await app.ainvoke(

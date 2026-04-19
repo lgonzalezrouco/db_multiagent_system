@@ -121,9 +121,26 @@ On first run (no schema docs persisted yet) the system automatically goes throug
 | `LLM_MODEL` | Model id as routed by LiteLLM |
 | `QUERY_MAX_REFINEMENTS` | Max critic → SQL retries (default `3`) |
 | `DEFAULT_USER_ID` / `DEFAULT_THREAD_ID` | Memory + LangGraph thread defaults |
-| `GRAPH_DEBUG` | Set `true` for extra graph logging |
+| `LANGSMITH_*` | Optional tracing to LangSmith ([Observability](#observability-langsmith) below) |
 
 See [`.env.example`](.env.example) for all defaults.
+
+---
+
+## Observability (LangSmith)
+
+Set tracing env vars (see [.env.example](.env.example)), then run a CLI question so LangGraph emits a trace:
+
+```bash
+export LANGSMITH_TRACING=true
+export LANGSMITH_API_KEY=your_key_here
+export LANGSMITH_PROJECT=dvdrental-local
+uv run python main.py -q "How many actors are there?"
+```
+
+Open your [LangSmith](https://smith.langchain.com/) project (same name as `LANGSMITH_PROJECT`, default `dvdrental-local` in `.env.example`) and inspect the run tree: graph nodes, LLM calls, and MCP tools such as `execute_readonly_sql` nested under the same invocation. Use `LANGSMITH_ENDPOINT` only for EU or self-hosted deployments.
+
+The CLI still emits **errors and warnings** to stderr; LangSmith remains the primary place for full run trees and spans.
 
 ---
 

@@ -1,6 +1,11 @@
 """LangGraph shell: shared state, MCP helpers, compiled graph."""
 
-from graph.graph import build_graph, get_compiled_graph, graph_run_config
+from graph.graph import (
+    build_graph,
+    build_traceable_config,
+    get_compiled_graph,
+    graph_run_config,
+)
 from graph.presence import (
     DbSchemaPresence,
     SchemaPresence,
@@ -14,6 +19,7 @@ __all__ = [
     "SchemaPresence",
     "SchemaPresenceResult",
     "build_graph",
+    "build_traceable_config",
     "get_compiled_graph",
     "graph_run_config",
 ]

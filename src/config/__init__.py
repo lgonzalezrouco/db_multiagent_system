@@ -1,3 +1,4 @@
+from config.langsmith_settings import LangSmithSettings
 from config.llm_settings import LLMSettings
 from config.mcp_settings import MCPSettings
 from config.memory_settings import AppMemorySettings
@@ -10,6 +11,7 @@ Settings = PostgresSettings
 
 __all__ = [
     "AppMemorySettings",
+    "LangSmithSettings",
     "LLMSettings",
     "MCPSettings",
     "PostgresSettings",
