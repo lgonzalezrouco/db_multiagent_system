@@ -138,7 +138,7 @@ async def test_query_path_runs_when_schema_ready(
     state = _unwrap_state(out)
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.gate_decision == "query_path"
-    assert state.schema.ready is True
+    assert state.schema_pipeline.ready is True
     lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
@@ -292,13 +292,13 @@ async def test_schema_path_interrupt_resume_persist(
         "schema_persist",
     ]
     assert final.gate_decision == "schema_path"
-    assert final.schema.ready is True
+    assert final.schema_pipeline.ready is True
     lr = final.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "schema_persist"
     assert lr.get("success") is True
     assert final.last_error is None
-    assert final.schema.persist_error is None
+    assert final.schema_pipeline.persist_error is None
 
     # Verify store was called correctly
     assert len(_FakeSchemaDocsStore.captured) == 1
@@ -506,8 +506,8 @@ async def test_schema_persist_pivots_to_query_when_user_input_present(
 
     assert state2.steps == _PIVOT_STEPS
     assert state2.gate_decision == "query_path"
-    assert state2.schema.ready is True
-    assert state2.schema.persist_error is None
+    assert state2.schema_pipeline.ready is True
+    assert state2.schema_pipeline.persist_error is None
 
     lr = state2.last_result
     assert isinstance(lr, dict), f"last_result should be a dict, got: {lr!r}"

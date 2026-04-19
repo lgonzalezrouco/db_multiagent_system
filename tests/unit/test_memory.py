@@ -538,7 +538,7 @@ def test_graph_state_defaults() -> None:
     state = GraphState()
     assert state.user_input == ""
     assert state.steps == []
-    assert isinstance(state.schema, SchemaPipelineState)
+    assert isinstance(state.schema_pipeline, SchemaPipelineState)
     assert isinstance(state.query, QueryPipelineState)
     assert isinstance(state.memory, MemoryState)
 

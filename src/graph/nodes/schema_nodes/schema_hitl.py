@@ -16,13 +16,13 @@ def schema_hitl(state: GraphState) -> dict[str, Any]:
     Metadata and draft are produced by prior nodes and already in checkpointed
     state, so this node stays safe to re-enter from the top.
     """
-    draft = state.schema.draft
+    draft = state.schema_pipeline.draft
     hitl_payload: dict[str, Any] = {
         "kind": "schema_review",
         "draft": draft,
     }
     approved = interrupt(hitl_payload)
     return {
-        "schema": {"approved": approved, "hitl_prompt": hitl_payload},
+        "schema_pipeline": {"approved": approved, "hitl_prompt": hitl_payload},
         "steps": ["schema_hitl"],
     }

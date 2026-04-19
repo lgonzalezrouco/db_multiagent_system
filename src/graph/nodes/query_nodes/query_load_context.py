@@ -14,7 +14,7 @@ async def query_load_context(state: GraphState) -> dict[str, Any]:
     return {
         "steps": [f"gate:{gate_decision}", "query_load_context"],
         "gate_decision": gate_decision,
-        "schema": {"ready": True},
+        "schema_pipeline": {"ready": True},
         "query": {
             "refinement_count": 0,
             "critic_status": None,

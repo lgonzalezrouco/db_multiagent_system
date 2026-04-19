@@ -108,10 +108,10 @@ def graph_run_config(
 
 def route_after_persist(state: GraphState) -> str:
     """After schema_persist: pivot to query pipeline if a user query is waiting."""
-    if state.schema.persist_error:
+    if state.schema_pipeline.persist_error:
         logger.warning(
             "schema_to_query_pivot skipped: persist_error=%r",
-            state.schema.persist_error,
+            state.schema_pipeline.persist_error,
         )
         return "end"
     if (state.user_input or "").strip():

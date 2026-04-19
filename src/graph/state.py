@@ -37,10 +37,10 @@ def merge_submodel(current: BaseModel, update: BaseModel | dict | None) -> BaseM
 class SchemaPipelineState(BaseModel):
     """State owned by the schema pipeline (inspect → draft → HITL → persist)."""
 
-    ready: bool = False  # formerly schema_ready
-    metadata: dict | None = None  # formerly schema_metadata
-    draft: dict | None = None  # formerly schema_draft
-    approved: dict | None = None  # formerly schema_approved
+    ready: bool = False
+    metadata: dict | None = None
+    draft: dict | None = None
+    approved: dict | None = None
     hitl_prompt: dict | None = None
     persist_error: str | None = None
 
@@ -48,15 +48,15 @@ class SchemaPipelineState(BaseModel):
 class QueryPipelineState(BaseModel):
     """State owned by the query pipeline (plan → SQL → critic → execute → explain)."""
 
-    docs_context: dict | None = None  # formerly schema_docs_context
-    docs_warning: str | None = None  # formerly schema_docs_warning
-    plan: dict | None = None  # formerly query_plan
+    docs_context: dict | None = None
+    docs_warning: str | None = None
+    plan: dict | None = None
     generated_sql: str | None = None
     critic_status: str | None = None
     critic_feedback: str | None = None
     refinement_count: int = 0
-    execution_result: dict | None = None  # formerly query_execution_result
-    explanation: str | None = None  # formerly query_explanation
+    execution_result: dict | None = None
+    explanation: str | None = None
 
 
 class ConversationTurn(BaseModel):
@@ -65,9 +65,7 @@ class ConversationTurn(BaseModel):
     user_input: str
     sql: str | None = None
     row_count: int | None = None
-    rows_preview: list[dict] = Field(
-        default_factory=list
-    )  # up to 3 rows, values trimmed
+    rows_preview: list[dict] = Field(default_factory=list)
     explanation: str | None = None
 
 
@@ -76,10 +74,8 @@ class MemoryState(BaseModel):
 
     preferences: dict | None = None
     preferences_dirty: bool = False
-    conversation_history: list[ConversationTurn] = Field(
-        default_factory=list
-    )  # capped at 5
-    warning: str | None = None  # formerly memory_warning
+    conversation_history: list[ConversationTurn] = Field(default_factory=list)
+    warning: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -95,11 +91,14 @@ class GraphState(BaseModel):
     gate_decision: str | None = None
     user_id: str = "default"
     session_id: str | None = None
-    last_result: str | dict | None = None  # shared output channel (UI/CLI)
-    last_error: str | None = None  # shared error channel  (UI/CLI)
+    last_result: str | dict | None = None
+    last_error: str | None = None
 
-    schema: Annotated[SchemaPipelineState, merge_submodel] = Field(
-        default_factory=SchemaPipelineState
+    # Named `schema_pipeline` so we do not shadow `BaseModel.schema()`. LangGraph
+    # state keys follow Python field names (see `GraphState.__annotations__`), so
+    # node updates must use the key ``schema_pipeline`` as well.
+    schema_pipeline: Annotated[SchemaPipelineState, merge_submodel] = Field(
+        default_factory=SchemaPipelineState,
     )
     query: Annotated[QueryPipelineState, merge_submodel] = Field(
         default_factory=QueryPipelineState

@@ -196,7 +196,7 @@ async def test_graph_ainvoke_completes_query_pipeline_with_mocked_mcp(
     state = _unwrap_state(out)
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.gate_decision == "query_path"
-    assert state.schema.ready is True
+    assert state.schema_pipeline.ready is True
     lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
@@ -243,7 +243,7 @@ async def test_graph_works_without_postgres_env_vars(
     state = _unwrap_state(out)
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.gate_decision == "query_path"
-    assert state.schema.ready is True
+    assert state.schema_pipeline.ready is True
     lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"

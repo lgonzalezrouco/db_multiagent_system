@@ -41,7 +41,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
         "last_error": None,
         "last_result": None,
         "gate_decision": gate_decision,
-        "schema": {
+        "schema_pipeline": {
             "ready": False,
             "persist_error": None,
         },
@@ -61,7 +61,11 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
         raw = await inspect_tool.ainvoke({"schema_name": "public", "table_name": None})
         payload = mcp_helpers.tool_result_to_dict(raw)
         if payload and payload.get("success"):
-            out["schema"] = {"ready": False, "persist_error": None, "metadata": payload}
+            out["schema_pipeline"] = {
+                "ready": False,
+                "persist_error": None,
+                "metadata": payload,
+            }
             out["last_result"] = inspect_schema_summary(payload)
         else:
             err = (payload or {}).get("error") if isinstance(payload, dict) else None
@@ -74,7 +78,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
                 else "could not parse MCP tool result"
             )
             out["last_result"] = inspect_schema_summary(payload)
-            out["schema"] = {
+            out["schema_pipeline"] = {
                 "ready": False,
                 "persist_error": None,
                 "metadata": payload if isinstance(payload, dict) else None,
