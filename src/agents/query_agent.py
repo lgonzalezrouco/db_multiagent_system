@@ -34,11 +34,7 @@ def _compact_json(data: Any, *, max_chars: int = 12000) -> str:
 
 
 def _history_block(conversation_history: list[dict] | None) -> str | None:
-    """Serialise conversation history for inclusion in a human message.
-
-    Returns ``None`` when the history is empty or absent so callers can
-    skip appending an empty block.
-    """
+    """JSON block for the human message, or None if there is no history."""
     if not conversation_history:
         return None
     return "Conversation history (JSON, oldest-first):\n" + _compact_json(

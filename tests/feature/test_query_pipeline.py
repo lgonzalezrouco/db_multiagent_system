@@ -9,8 +9,8 @@ import pytest
 
 from agents.schemas.query_outputs import QueryCritiqueOutput, QueryExplanationOutput
 from graph import get_compiled_graph, graph_run_config
+from graph.invoke_v2 import unwrap_graph_v2
 from graph.nodes.query_nodes import validate_sql_for_execution
-from graph.state import GraphState
 from tests.schema_presence_stubs import ReadySchemaPresence
 
 _QUERY_SUCCESS_STEPS = [
@@ -45,20 +45,6 @@ def mcp_only_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
     monkeypatch.delenv("POSTGRES_DB", raising=False)
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
-
-
-def _unwrap_state(out: Any) -> GraphState:
-    """Extract GraphState from graph output (v1 dict or Pydantic model)."""
-    if isinstance(out, GraphState):
-        return out
-    if isinstance(out, dict):
-        return GraphState(**out)
-    value = getattr(out, "value", None)
-    if isinstance(value, GraphState):
-        return value
-    if isinstance(value, dict):
-        return GraphState(**value)
-    raise TypeError(f"unexpected output: {type(out).__name__}")
 
 
 # ---------------------------------------------------------------------------
@@ -193,7 +179,7 @@ async def test_graph_ainvoke_completes_query_pipeline_with_mocked_mcp(
     )
 
     # Then: query pipeline completes successfully
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.gate_decision == "query_path"
     assert state.schema_pipeline.ready is True
@@ -240,7 +226,7 @@ async def test_graph_works_without_postgres_env_vars(
     )
 
     # Then: query pipeline completes successfully
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.gate_decision == "query_path"
     assert state.schema_pipeline.ready is True
@@ -281,7 +267,7 @@ async def test_pipeline_clears_last_result_on_tool_error(
     )
 
     # Then: last_result is cleared and error is set
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.last_error is not None
     assert state.last_result is None
@@ -347,7 +333,7 @@ async def test_critic_retry_then_success(
     )
 
     # Then: retry occurred and succeeded
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == [
         "memory_load_user",
         "gate:query_path",
@@ -414,7 +400,7 @@ async def test_refinement_cap_prevents_infinite_retry(
     )
 
     # Then: cap is reached and error is reported
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == [
         "memory_load_user",
         "gate:query_path",
@@ -542,7 +528,7 @@ async def test_semantic_critic_rejection_triggers_retry(
     )
 
     # Then: retry occurred with correct SQL
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == [
         "memory_load_user",
         "gate:query_path",
@@ -625,7 +611,7 @@ async def test_missing_schema_docs_sets_warning(
     )
 
     # Then: warning is set and included in limitations
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     warn = state.query.docs_warning
     assert isinstance(warn, str) and warn
     lr = state.last_result
@@ -679,7 +665,7 @@ async def test_mcp_error_message_propagates_to_last_error(
     )
 
     # Then: error message is in last_error
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.last_error == expected_msg
     assert state.last_result is None
 
@@ -742,7 +728,7 @@ async def test_explain_falls_back_when_llm_fails(
     )
 
     # Then: fallback explanation is used
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.last_error is None
     lr = state.last_result
     assert isinstance(lr, dict)
@@ -752,11 +738,6 @@ async def test_explain_falls_back_when_llm_fails(
     assert "show actor count" in explanation
     assert isinstance(limitations, str)
     assert "Read-only SELECT with LIMIT" in limitations
-
-
-# ---------------------------------------------------------------------------
-# Conversation history (iterative refinement)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -794,16 +775,14 @@ async def test_two_turns_accumulate_conversation_history(
     q1 = "Which actors worked with Nick Wahlberg?"
     q2 = "Now show me his movies."
 
-    # Turn 1
     out1 = await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
-    state1 = _unwrap_state(out1)
+    state1 = unwrap_graph_v2(out1)[0]
     assert state1.last_error is None
     assert len(state1.memory.conversation_history) == 1
     assert state1.memory.conversation_history[0].user_input == q1
 
-    # Turn 2
     out2 = await app.ainvoke({"user_input": q2, "steps": [], **state_seed}, config=cfg)
-    state2 = _unwrap_state(out2)
+    state2 = unwrap_graph_v2(out2)[0]
     assert state2.last_error is None
     assert len(state2.memory.conversation_history) == 2
     assert state2.memory.conversation_history[1].user_input == q2
@@ -893,7 +872,6 @@ async def test_second_turn_receives_history_in_llm_prompt(
 
     q1 = "Which actors worked with Nick Wahlberg?"
 
-    # Turn 1 — no prior history so no history block expected
     await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
     assert len(plan_messages_by_turn) == 1
     turn1_human = next(
@@ -901,7 +879,6 @@ async def test_second_turn_receives_history_in_llm_prompt(
     )
     assert "Conversation history (JSON" not in turn1_human
 
-    # Turn 2 — must carry turn-1 history in the human message
     await app.ainvoke(
         {"user_input": "Now show me his movies.", "steps": [], **state_seed},
         config=cfg,

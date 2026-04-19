@@ -49,11 +49,6 @@ def _make_capturing_llm(stub_output: Any) -> tuple[MagicMock, list[Any]]:
     return mock_llm, captured
 
 
-# ---------------------------------------------------------------------------
-# _history_block
-# ---------------------------------------------------------------------------
-
-
 def test_history_block_returns_none_for_none() -> None:
     assert _history_block(None) is None
 
@@ -77,10 +72,6 @@ def test_history_block_includes_all_turns() -> None:
     assert result is not None
     assert "q1" in result and "q2" in result
 
-
-# ---------------------------------------------------------------------------
-# build_query_plan — history injection
-# ---------------------------------------------------------------------------
 
 _PLAN_STUB = QueryPlanOutput(
     intent="explore",
@@ -126,10 +117,6 @@ async def test_build_query_plan_omits_history_when_empty() -> None:
     assert "Conversation history (JSON" not in _human_content(captured)
 
 
-# ---------------------------------------------------------------------------
-# build_sql — history injection
-# ---------------------------------------------------------------------------
-
 _SQL_STUB = SqlGenerationOutput(sql="SELECT * FROM actor LIMIT 10", rationale="stub")
 
 
@@ -158,10 +145,6 @@ async def test_build_sql_omits_history_when_none() -> None:
         await build_sql("List actors", None, None, 0, conversation_history=None)
     assert "Conversation history (JSON" not in _human_content(captured)
 
-
-# ---------------------------------------------------------------------------
-# build_query_critique — history injection
-# ---------------------------------------------------------------------------
 
 _CRITIQUE_STUB = QueryCritiqueOutput(
     verdict="accept", feedback="ok", risks=[], assumptions=[]

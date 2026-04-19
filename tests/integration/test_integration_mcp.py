@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from config import PostgresSettings, Settings
 from graph import get_compiled_graph, graph_run_config
+from graph.invoke_v2 import unwrap_graph_v2
 from mcp_server.main import build_app
 from mcp_server.readonly_sql import execute_readonly_sql
 from mcp_server.schema_metadata import fetch_schema_metadata
@@ -74,19 +75,15 @@ async def test_query_pipeline_via_live_mcp_http(
         cfg, state_seed = graph_run_config(
             thread_id="mcp-integration-1", run_kind="pytest"
         )
-        result = await app.ainvoke(
+        out = await app.ainvoke(
             {"user_input": "integration", "steps": [], **state_seed},
             config=cfg,
         )
 
         # Then: query answer is returned
-        if result.get("last_error"):
-            q = result.get("query")
-            qer = None
-            if isinstance(q, dict):
-                qer = q.get("execution_result")
-            elif q is not None:
-                qer = getattr(q, "execution_result", None)
+        state, _ = unwrap_graph_v2(out)
+        if state.last_error:
+            qer = state.query.execution_result
             nested: dict = {}
             if isinstance(qer, dict):
                 err = qer.get("error")
@@ -94,12 +91,12 @@ async def test_query_pipeline_via_live_mcp_http(
                     nested = err
             if nested.get("type") == "connection_error":
                 pytest.skip("Postgres unreachable (is docker compose up?)")
-            pytest.fail(f"graph left last_error set: {result!r}")
+            pytest.fail(f"graph left last_error set: {state!r}")
 
-        lr = result.get("last_result")
+        lr = state.last_result
         assert isinstance(lr, dict)
         assert lr.get("kind") == "query_answer"
-        assert result.get("steps") == [
+        assert state.steps == [
             "memory_load_user",
             "gate:query_path",
             "query_load_context",

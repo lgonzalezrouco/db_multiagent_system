@@ -12,11 +12,6 @@ HISTORY_ROWS_PREVIEW: int = 3
 HISTORY_ROW_VALUE_MAX_CHARS: int = 200
 
 
-# ---------------------------------------------------------------------------
-# Private helpers
-# ---------------------------------------------------------------------------
-
-
 def _trim_rows(execution_result: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Return up to HISTORY_ROWS_PREVIEW rows with string values truncated."""
     if not isinstance(execution_result, dict):
@@ -31,7 +26,6 @@ def _trim_rows(execution_result: dict[str, Any] | None) -> list[dict[str, Any]]:
             }
             out.append(trimmed)
         elif isinstance(row, (list, tuple)):
-            # Columns not available here; store as a list
             out.append(
                 {
                     str(i): v[:HISTORY_ROW_VALUE_MAX_CHARS] if isinstance(v, str) else v
@@ -41,18 +35,8 @@ def _trim_rows(execution_result: dict[str, Any] | None) -> list[dict[str, Any]]:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
 def seed_session_fields(state: GraphState) -> dict[str, Any]:
-    """Return state delta that preserves ``conversation_history`` across turns.
-
-    Called at the start of each turn (inside ``memory_load_user``) so that
-    loading preferences / schema docs does not inadvertently clear the history
-    that was checkpointed from the previous turn.
-    """
+    """Preserve ``conversation_history`` when memory_load_user merges other fields."""
     return {
         "memory": {
             "conversation_history": list(state.memory.conversation_history),
@@ -61,31 +45,23 @@ def seed_session_fields(state: GraphState) -> dict[str, Any]:
 
 
 def snapshot_session_fields(state: GraphState) -> dict[str, Any]:
-    """Append a ConversationTurn for the completed turn (if SQL was executed).
-
-    Called at the end of each turn (inside ``memory_update_session``).
-    Schema-path turns and error turns (no generated SQL) do not append.
-    History is capped at HISTORY_MAX_TURNS (FIFO).
-    """
-    from graph.state import ConversationTurn  # avoid circular at module level
+    """Append a ConversationTurn after successful SQL execution; cap history FIFO."""
+    from graph.state import ConversationTurn
 
     sql = state.query.generated_sql
     if not sql:
-        # Schema turns / error turns — do not pollute history
         return {}
 
-    # Do not record turns that ended with an error or a failed execution
     if state.last_error:
         return {}
 
     execution_result = state.query.execution_result
     if not isinstance(execution_result, dict) or not execution_result.get("success"):
         return {}
-    row_count: int | None = None
-    if isinstance(execution_result, dict):
-        row_count = execution_result.get("row_count") or execution_result.get(
-            "rows_returned"
-        )
+
+    row_count = execution_result.get("row_count") or execution_result.get(
+        "rows_returned"
+    )
 
     turn = ConversationTurn(
         user_input=state.user_input or "",

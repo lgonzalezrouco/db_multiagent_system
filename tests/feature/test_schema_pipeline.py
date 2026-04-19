@@ -15,7 +15,6 @@ from graph import (
     graph_run_config,
 )
 from graph.invoke_v2 import unwrap_graph_v2
-from graph.state import GraphState
 from memory.preferences import default_preferences
 from tests.schema_presence_stubs import NotReadySchemaPresence, ReadySchemaPresence
 
@@ -58,21 +57,6 @@ def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("POSTGRES_DB", "dvdrental")
     monkeypatch.setenv("MCP_HOST", "127.0.0.1")
     monkeypatch.setenv("MCP_PORT", "8000")
-
-
-def _unwrap_state(out: Any) -> GraphState:
-    """Extract the GraphState from a graph output (v1 or v2)."""
-    if isinstance(out, GraphState):
-        return out
-    if isinstance(out, dict):
-        return GraphState(**out)
-    # v2 GraphOutput
-    value = getattr(out, "value", None)
-    if isinstance(value, GraphState):
-        return value
-    if isinstance(value, dict):
-        return GraphState(**value)
-    raise TypeError(f"unexpected output: {type(out).__name__}")
 
 
 class _FakeSchemaDocsStore:
@@ -135,7 +119,7 @@ async def test_query_path_runs_when_schema_ready(
     )
 
     # Then: query pipeline executes
-    state = _unwrap_state(out)
+    state = unwrap_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.gate_decision == "query_path"
     assert state.schema_pipeline.ready is True
@@ -257,7 +241,7 @@ async def test_schema_path_interrupt_resume_persist(
 
     # Then: interrupt before persist
     assert out1.interrupts, "expected interrupt before persist"
-    st1 = _unwrap_state(out1)
+    st1 = unwrap_graph_v2(out1)[0]
     assert st1.steps == [
         "gate:schema_path",
         "schema_inspect",
@@ -283,7 +267,7 @@ async def test_schema_path_interrupt_resume_persist(
 
     # Then: completes without further interrupts
     assert not out2.interrupts
-    final = _unwrap_state(out2)
+    final = unwrap_graph_v2(out2)[0]
     assert final.steps == [
         "gate:schema_path",
         "schema_inspect",

@@ -26,19 +26,12 @@ from memory.session import (
     snapshot_session_fields,
 )
 
-# ---------------------------------------------------------------------------
-# default_preferences
-# ---------------------------------------------------------------------------
-
 
 def test_default_preferences_returns_all_canonical_keys() -> None:
     """Default preferences contain all required keys with expected defaults."""
-    # Given: no existing preferences
 
-    # When: getting default preferences
     prefs = default_preferences()
 
-    # Then: all canonical keys are present with correct defaults
     assert set(prefs) >= {
         "preferred_language",
         "output_format",
@@ -50,11 +43,6 @@ def test_default_preferences_returns_all_canonical_keys() -> None:
     assert prefs["row_limit_hint"] == 10
 
 
-# ---------------------------------------------------------------------------
-# session helpers
-# ---------------------------------------------------------------------------
-
-
 def test_seed_session_fields_preserves_existing_history() -> None:
     """Existing conversation_history is preserved when seeding."""
     from graph.state import ConversationTurn
@@ -62,10 +50,8 @@ def test_seed_session_fields_preserves_existing_history() -> None:
     turn = ConversationTurn(user_input="hello", sql="SELECT 1 LIMIT 1")
     state = GraphState(memory=MemoryState(conversation_history=[turn]))
 
-    # When: seeding session fields
     delta = seed_session_fields(state)
 
-    # Then: history is preserved
     assert "memory" in delta
     assert len(delta["memory"]["conversation_history"]) == 1
     assert delta["memory"]["conversation_history"][0].user_input == "hello"
@@ -168,20 +154,13 @@ def test_snapshot_caps_history_at_max_turns() -> None:
 
     history = delta["memory"]["conversation_history"]
     assert len(history) == HISTORY_MAX_TURNS
-    # The oldest entry should be dropped; newest is "new question"
     assert history[-1].user_input == "new question"
-    assert history[0].user_input == "q1"  # q0 was dropped
-
-
-# ---------------------------------------------------------------------------
-# DbSchemaPresence with mocked store
-# ---------------------------------------------------------------------------
+    assert history[0].user_input == "q1"
 
 
 def test_db_schema_presence_returns_ready_when_store_ready() -> None:
     """Schema presence returns ready when store is ready."""
 
-    # Given: a store that reports ready
     class _ReadyStore:
         def __init__(self, settings=None):
             pass
@@ -189,18 +168,15 @@ def test_db_schema_presence_returns_ready_when_store_ready() -> None:
         def is_ready(self) -> bool:
             return True
 
-    # When: checking presence
     presence = DbSchemaPresence(store=_ReadyStore())
     result = presence.check()
 
-    # Then: result indicates ready with no reason
     assert result == SchemaPresenceResult(True, None)
 
 
 def test_db_schema_presence_returns_not_ready_when_store_not_ready() -> None:
     """Schema presence returns not ready when store is not ready."""
 
-    # Given: a store that reports not ready
     class _NotReadyStore:
         def __init__(self, settings=None):
             pass
@@ -208,11 +184,9 @@ def test_db_schema_presence_returns_not_ready_when_store_not_ready() -> None:
         def is_ready(self) -> bool:
             return False
 
-    # When: checking presence
     presence = DbSchemaPresence(store=_NotReadyStore())
     result = presence.check()
 
-    # Then: result indicates not ready with reason
     assert result.ready is False
     assert result.reason is not None
 
@@ -220,7 +194,6 @@ def test_db_schema_presence_returns_not_ready_when_store_not_ready() -> None:
 def test_db_schema_presence_soft_fails_on_operational_error() -> None:
     """Schema presence handles DB connection errors gracefully."""
 
-    # Given: a store that raises OperationalError
     class _ErrorStore:
         def __init__(self, settings=None):
             pass
@@ -228,19 +201,12 @@ def test_db_schema_presence_soft_fails_on_operational_error() -> None:
         def is_ready(self) -> bool:
             raise psycopg.OperationalError("connection refused")
 
-    # When: checking presence
     presence = DbSchemaPresence(store=_ErrorStore())
     result = presence.check()
 
-    # Then: result indicates not ready with unreachable reason
     assert result.ready is False
     assert result.reason is not None
     assert "unreachable" in result.reason
-
-
-# ---------------------------------------------------------------------------
-# memory_load_user (mocked stores)
-# ---------------------------------------------------------------------------
 
 
 class _FakePrefsStore:
@@ -288,7 +254,6 @@ async def test_memory_load_user_loads_prefs_and_docs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User memory loads preferences and schema docs successfully."""
-    # Given: stores with existing prefs and docs
     sample_payload = {"version": 1, "tables": [{"name": "actor"}]}
     fake_prefs = {"preferred_language": "es", "row_limit_hint": 5}
     store_instance_prefs = _FakePrefsStore(prefs=fake_prefs)
@@ -303,11 +268,9 @@ async def test_memory_load_user_loads_prefs_and_docs(
         lambda settings=None: store_instance_docs,
     )
 
-    # When: loading user memory
     state = GraphState(user_id="alice")
     result = await memory_load_user(state)
 
-    # Then: preferences and docs are loaded without warnings
     assert result["user_id"] == "alice"
     assert result["memory"]["preferences"] == {**default_preferences(), **fake_prefs}
     assert result["query"]["docs_context"] == sample_payload
@@ -321,7 +284,6 @@ async def test_memory_load_user_sets_warning_when_no_docs(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User memory warns when schema docs are not available."""
-    # Given: stores without schema docs
     monkeypatch.setattr(
         "graph.memory_nodes.UserPreferencesStore",
         lambda settings=None: _FakePrefsStore(),
@@ -331,11 +293,9 @@ async def test_memory_load_user_sets_warning_when_no_docs(
         lambda settings=None: _FakeSchemaDocsStore(payload=None),
     )
 
-    # When: loading user memory
     state = GraphState()
     result = await memory_load_user(state)
 
-    # Then: schema docs warning is set
     assert result["query"].get("docs_context") is None
     assert result["query"].get("docs_warning") is not None
     assert result["memory"].get("warning") is None
@@ -346,18 +306,15 @@ async def test_memory_load_user_soft_fails_on_prefs_db_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User memory falls back to defaults when prefs DB is unreachable."""
-    # Given: prefs store that fails
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
     monkeypatch.setattr(
         "graph.memory_nodes.SchemaDocsStore",
         lambda settings=None: _FakeSchemaDocsStore(payload=None),
     )
 
-    # When: loading user memory
     state = GraphState()
     result = await memory_load_user(state)
 
-    # Then: defaults are used and warning is set
     assert result["memory"]["preferences"] == default_preferences()
     assert result["memory"].get("warning") is not None
     assert "unreachable" in result["memory"]["warning"]
@@ -368,18 +325,15 @@ async def test_memory_load_user_soft_fails_on_docs_db_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User memory warns when docs DB is unreachable."""
-    # Given: docs store that fails
     monkeypatch.setattr(
         "graph.memory_nodes.UserPreferencesStore",
         lambda settings=None: _FakePrefsStore(),
     )
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _ErrorStore)
 
-    # When: loading user memory
     state = GraphState()
     result = await memory_load_user(state)
 
-    # Then: warnings are set for both
     assert result["memory"].get("preferences") is not None
     assert result["query"].get("docs_warning") is not None
     assert result["memory"].get("warning") is not None
@@ -390,23 +344,15 @@ async def test_memory_load_user_soft_fails_on_both_db_errors(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """User memory falls back gracefully when both DBs are unreachable."""
-    # Given: both stores that fail
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _ErrorStore)
 
-    # When: loading user memory
     state = GraphState()
     result = await memory_load_user(state)
 
-    # Then: defaults are used and warnings are set
     assert result["memory"]["preferences"] == default_preferences()
     assert result["memory"].get("warning") is not None
     assert result["query"].get("docs_warning") is not None
-
-
-# ---------------------------------------------------------------------------
-# memory_update_session (mocked stores)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -414,7 +360,6 @@ async def test_memory_update_session_snapshots_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Session update snapshots SQL into conversation history."""
-    # Given: completed query state
     state = GraphState(
         user_input="list films",
         query=QueryPipelineState(
@@ -424,10 +369,8 @@ async def test_memory_update_session_snapshots_fields(
         ),
     )
 
-    # When: updating session
     result = await memory_update_session(state)
 
-    # Then: conversation history has the new turn
     assert "memory_update_session" in result["steps"]
     history = result["memory"]["conversation_history"]
     assert len(history) == 1
@@ -440,7 +383,6 @@ async def test_memory_update_session_upserts_when_dirty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Session update persists preferences when dirty flag is set."""
-    # Given: dirty preferences
     upserted: list[dict] = []
 
     class _CapturingPrefsStore(_FakePrefsStore):
@@ -461,10 +403,8 @@ async def test_memory_update_session_upserts_when_dirty(
         ),
     )
 
-    # When: updating session
     result = await memory_update_session(state)
 
-    # Then: preferences are persisted and dirty flag is cleared
     assert len(upserted) == 1
     assert upserted[0]["user_id"] == "bob"
     assert upserted[0]["prefs"]["preferred_language"] == "fr"
@@ -476,7 +416,6 @@ async def test_memory_update_session_skips_upsert_on_db_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Session update handles DB errors gracefully."""
-    # Given: failing prefs store
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
 
     state = GraphState(
@@ -487,17 +426,10 @@ async def test_memory_update_session_skips_upsert_on_db_error(
         ),
     )
 
-    # When: updating session
     result = await memory_update_session(state)
 
-    # Then: warning is set
     assert result.get("memory", {}).get("warning") is not None
     assert "could not persist" in result["memory"]["warning"]
-
-
-# ---------------------------------------------------------------------------
-# append_steps reducer
-# ---------------------------------------------------------------------------
 
 
 def test_append_steps_extends_list() -> None:
@@ -509,18 +441,13 @@ def test_append_steps_empty_update_returns_current() -> None:
 
 
 def test_append_steps_none_update_returns_current() -> None:
-    assert append_steps(["a"], None) == ["a"]  # type: ignore[arg-type]
+    assert append_steps(["a"], None) == ["a"]
 
 
 def test_append_steps_does_not_mutate_original() -> None:
     original = ["a", "b"]
     append_steps(original, ["c"])
     assert original == ["a", "b"]
-
-
-# ---------------------------------------------------------------------------
-# merge_submodel reducer
-# ---------------------------------------------------------------------------
 
 
 def test_merge_submodel_none_update_returns_current() -> None:
@@ -551,7 +478,7 @@ def test_merge_submodel_basemodel_only_sets_explicitly_set_fields() -> None:
     update = QueryPipelineState(generated_sql="SELECT 2")
     result = merge_submodel(current, update)
     assert result.generated_sql == "SELECT 2"
-    assert result.refinement_count == 3  # not overwritten
+    assert result.refinement_count == 3
 
 
 def test_merge_submodel_schema_preserves_unset() -> None:
@@ -559,11 +486,6 @@ def test_merge_submodel_schema_preserves_unset() -> None:
     result = merge_submodel(current, {"persist_error": "DB down"})
     assert result.ready is True
     assert result.persist_error == "DB down"
-
-
-# ---------------------------------------------------------------------------
-# GraphState / sub-model defaults
-# ---------------------------------------------------------------------------
 
 
 def test_graph_state_defaults() -> None:
@@ -581,11 +503,6 @@ def test_conversation_turn_defaults() -> None:
     assert t.row_count is None
     assert t.rows_preview == []
     assert t.explanation is None
-
-
-# ---------------------------------------------------------------------------
-# _trim_rows helper
-# ---------------------------------------------------------------------------
 
 
 def test_trim_rows_keeps_up_to_preview_limit() -> None:
@@ -607,11 +524,6 @@ def test_trim_rows_preserves_non_string_values() -> None:
 
 def test_trim_rows_returns_empty_for_none_input() -> None:
     assert _trim_rows(None) == []
-
-
-# ---------------------------------------------------------------------------
-# snapshot row preview and row_count
-# ---------------------------------------------------------------------------
 
 
 def test_snapshot_includes_row_preview() -> None:

@@ -27,7 +27,6 @@ def unwrap_graph_v2(
     if isinstance(value, GraphState):
         return value, interrupts
     if isinstance(value, BaseModel):
-        # Coerce any other BaseModel subclass that may be returned
         return GraphState.model_validate(value.model_dump()), interrupts
     if isinstance(value, dict):
         return GraphState(**value), interrupts

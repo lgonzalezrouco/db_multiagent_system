@@ -6,10 +6,6 @@ from typing import Annotated
 
 from pydantic import BaseModel, Field
 
-# ---------------------------------------------------------------------------
-# Reducers
-# ---------------------------------------------------------------------------
-
 
 def append_steps(current: list[str], update: list[str] | None) -> list[str]:
     """Extend the steps list with new entries from a node update."""
@@ -27,11 +23,6 @@ def merge_submodel[T: BaseModel](current: T, update: BaseModel | dict | None) ->
     if isinstance(update, dict):
         return current.model_copy(update=update)
     return current.model_copy(update=update.model_dump(exclude_unset=True))
-
-
-# ---------------------------------------------------------------------------
-# Sub-models
-# ---------------------------------------------------------------------------
 
 
 class SchemaPipelineState(BaseModel):
@@ -78,11 +69,6 @@ class MemoryState(BaseModel):
     warning: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Top-level graph state
-# ---------------------------------------------------------------------------
-
-
 class GraphState(BaseModel):
     """LangGraph state: schema gate, schema HITL, query pipeline, and memory fields."""
 
@@ -94,9 +80,7 @@ class GraphState(BaseModel):
     last_result: str | dict | None = None
     last_error: str | None = None
 
-    # Named `schema_pipeline` so we do not shadow `BaseModel.schema()`. LangGraph
-    # state keys follow Python field names (see `GraphState.__annotations__`), so
-    # node updates must use the key ``schema_pipeline`` as well.
+    # Field name avoids shadowing BaseModel.schema(); nodes must use this key.
     schema_pipeline: Annotated[SchemaPipelineState, merge_submodel] = Field(
         default_factory=SchemaPipelineState,
     )
