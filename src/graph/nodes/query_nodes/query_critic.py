@@ -2,12 +2,11 @@ from __future__ import annotations
 
 import logging
 import os
-import re
 from typing import Any, Literal
 
 from agents.query_agent import build_query_critique
 from graph.state import GraphState
-from mcp_server.readonly_sql import mask_sql_for_analysis, validate_readonly_sql
+from mcp_server.readonly_sql import sql_has_limit, validate_readonly_sql
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,7 @@ def validate_sql_for_execution(sql: str | None) -> tuple[bool, str]:
             msg = str(err["message"])
         return False, msg
 
-    masked = mask_sql_for_analysis(sql.strip())
-    if not re.search(r"\bLIMIT\b", masked, flags=re.IGNORECASE):
+    if not sql_has_limit(sql):
         return False, "SQL must include a LIMIT clause."
 
     return True, ""
@@ -47,6 +45,16 @@ def _normalize_critic_verdict(raw: Any) -> str:
     if text in {"accept", "approved", "ok", "pass", "yes"}:
         return "accept"
     return "reject"
+
+
+def _normalize_safety_strictness(preferences: Any) -> str:
+    """Return the validated safety_strictness level from preferences."""
+    if not isinstance(preferences, dict):
+        return "strict"
+    raw = str(preferences.get("safety_strictness") or "strict").strip().lower()
+    if raw in {"strict", "normal", "lenient"}:
+        return raw
+    return "strict"
 
 
 def _semantic_feedback(payload: dict[str, Any] | None) -> str:
@@ -67,6 +75,65 @@ def _semantic_feedback(payload: dict[str, Any] | None) -> str:
     parts = [feedback] if feedback else []
     parts.extend(extras)
     return " ".join(parts).strip() or "Semantic critic rejected the SQL."
+
+
+def _apply_strictness(
+    verdict: str,
+    critique: dict[str, Any],
+    strictness: str,
+    refinement_count: int,
+) -> dict[str, Any]:
+    """Translate LLM verdict + strictness level into a critic state update.
+
+    Returns a partial ``query`` state dict with ``critic_status``,
+    ``critic_feedback``, and (when rejecting) ``refinement_count``.
+
+    Strictness semantics
+    --------------------
+    strict  — reject if verdict is "reject" OR if any non-empty risks list is
+              present on an "accept" verdict (risk-aware blocking).
+    normal  — reject only on explicit "reject" verdict (default behaviour).
+    lenient — always accept; annotate critic_feedback with risks as a warning
+              but never block execution.
+    """
+    risks: list[str] = [
+        str(r).strip() for r in (critique.get("risks") or []) if str(r).strip()
+    ]
+
+    if strictness == "lenient":
+        # Always pass through; attach risk annotation if any.
+        feedback = None
+        if risks:
+            feedback = "Lenient mode — risks noted: " + "; ".join(risks[:3])
+        return {"critic_status": "accept", "critic_feedback": feedback}
+
+    if strictness == "strict":
+        # Block on explicit reject OR on any non-empty risks even with accept.
+        if verdict == "reject":
+            return {
+                "critic_status": "reject",
+                "critic_feedback": _semantic_feedback(critique),
+                "refinement_count": refinement_count + 1,
+            }
+        if risks:
+            feedback = "Strict mode — risks flagged on accepted SQL: " + "; ".join(
+                risks[:3]
+            )
+            return {
+                "critic_status": "reject",
+                "critic_feedback": feedback,
+                "refinement_count": refinement_count + 1,
+            }
+        return {"critic_status": "accept", "critic_feedback": None}
+
+    # normal — block only on explicit reject.
+    if verdict == "reject":
+        return {
+            "critic_status": "reject",
+            "critic_feedback": _semantic_feedback(critique),
+            "refinement_count": refinement_count + 1,
+        }
+    return {"critic_status": "accept", "critic_feedback": None}
 
 
 def route_after_critic(state: GraphState) -> Literal["execute", "retry", "cap"]:
@@ -123,20 +190,16 @@ async def query_critic(state: GraphState) -> dict[str, Any]:
         }
 
     verdict = _normalize_critic_verdict(critique.get("verdict"))
-    if verdict == "accept":
-        return {
-            "steps": ["query_critic"],
-            "query": {"critic_status": "accept", "critic_feedback": None},
-        }
+    strictness = _normalize_safety_strictness(prefs)
+    rc = int(state.query.refinement_count or 0)
 
-    semantic_feedback = _semantic_feedback(critique)
-    logger.warning("Semantic SQL critic rejected generated SQL: %s", semantic_feedback)
-    rc = int(state.query.refinement_count or 0) + 1
-    return {
-        "steps": ["query_critic"],
-        "query": {
-            "critic_status": "reject",
-            "critic_feedback": semantic_feedback,
-            "refinement_count": rc,
-        },
-    }
+    query_update = _apply_strictness(verdict, critique, strictness, rc)
+
+    if query_update.get("critic_status") == "reject":
+        logger.warning(
+            "Semantic SQL critic rejected (strictness=%s): %s",
+            strictness,
+            query_update.get("critic_feedback"),
+        )
+
+    return {"steps": ["query_critic"], "query": query_update}

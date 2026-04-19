@@ -16,6 +16,7 @@ from graph.nodes.query_nodes import (
     preferences_infer,
     preferences_persist,
     query_critic,
+    query_enforce_limit,
     query_execute,
     query_explain,
     query_generate_sql,
@@ -149,6 +150,7 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     workflow.add_node("preferences_persist", preferences_persist)
     workflow.add_node("query_plan", query_plan)
     workflow.add_node("query_generate_sql", query_generate_sql)
+    workflow.add_node("query_enforce_limit", query_enforce_limit)
     workflow.add_node("query_critic", query_critic)
     workflow.add_node("query_execute", query_execute)
     workflow.add_node("query_explain", query_explain)
@@ -189,7 +191,8 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     )
     workflow.add_edge("preferences_persist", "query_plan")
     workflow.add_edge("query_plan", "query_generate_sql")
-    workflow.add_edge("query_generate_sql", "query_critic")
+    workflow.add_edge("query_generate_sql", "query_enforce_limit")
+    workflow.add_edge("query_enforce_limit", "query_critic")
     workflow.add_conditional_edges(
         "query_critic",
         route_after_critic,
@@ -214,11 +217,8 @@ def get_compiled_graph(
 ):
     """Return a compiled graph with ``MemorySaver`` by default (required for HITL).
 
-    Both ``schema_hitl`` and ``preferences_hitl`` are interrupt boundaries;
-    callers resume them by invoking the graph with the approved payload.
+    Both ``schema_hitl`` and ``preferences_hitl`` call ``interrupt()`` inside
+    their node body; no ``interrupt_before`` is required.
     """
     ckpt = checkpointer if checkpointer is not None else MemorySaver()
-    return build_graph(presence=presence).compile(
-        checkpointer=ckpt,
-        interrupt_before=["schema_hitl", "preferences_hitl"],
-    )
+    return build_graph(presence=presence).compile(checkpointer=ckpt)

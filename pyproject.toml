@@ -28,6 +28,7 @@ dependencies = [
     "mcp>=1.27.0",
     "psycopg[binary]>=3.3.3",
     "pydantic-settings>=2.13.1",
+    "sqlglot>=30.4.3",
     "streamlit>=1.56.0",
 ]
 

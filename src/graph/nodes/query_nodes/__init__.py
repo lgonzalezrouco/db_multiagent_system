@@ -7,6 +7,7 @@ __all__ = [
     "query_load_context",
     "query_plan",
     "query_generate_sql",
+    "query_enforce_limit",
     "query_critic",
     "route_after_critic",
     "validate_sql_for_execution",
@@ -19,6 +20,7 @@ from .preferences_hitl import preferences_hitl
 from .preferences_infer import preferences_infer
 from .preferences_persist import preferences_persist
 from .query_critic import query_critic, route_after_critic, validate_sql_for_execution
+from .query_enforce_limit import query_enforce_limit
 from .query_execute import query_execute
 from .query_explain import query_explain
 from .query_generate_sql import query_generate_sql

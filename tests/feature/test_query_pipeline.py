@@ -17,8 +17,10 @@ _QUERY_SUCCESS_STEPS = [
     "memory_load_user",
     "gate:query_path",
     "query_load_context",
+    "preferences_infer",
     "query_plan",
     "query_generate_sql",
+    "query_enforce_limit",
     "query_critic",
     "query_execute",
     "query_explain",
@@ -315,7 +317,9 @@ async def test_critic_retry_then_success(
     ) -> str:
         calls.append(rc)
         if rc == 0:
-            return "SELECT COUNT(*) FROM public.actor"
+            # Missing LIMIT: query_enforce_limit will inject one, but
+            # using a forbidden token ensures structural rejection regardless.
+            return "DELETE FROM public.actor"
         return "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10"
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
@@ -338,10 +342,13 @@ async def test_critic_retry_then_success(
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
+        "preferences_infer",
         "query_plan",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_execute",
         "query_explain",
@@ -383,7 +390,8 @@ async def test_refinement_cap_prevents_infinite_retry(
         _rc: int,
         **_kw: Any,
     ) -> str:
-        return "SELECT 1"
+        # Forbidden token — structural check rejects this even after enforce_limit.
+        return "DROP TABLE public.actor"
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
     query_gen_mod = importlib.import_module(
@@ -405,12 +413,16 @@ async def test_refinement_cap_prevents_infinite_retry(
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
+        "preferences_infer",
         "query_plan",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_refine_cap",
         "memory_update_session",
@@ -474,6 +486,15 @@ async def test_semantic_critic_rejection_triggers_retry(
                     limitations="Preview only; results may be truncated by LIMIT.",
                     follow_up_suggestions=[],
                 )
+            if self.kind == "preferences_infer":
+                from agents.schemas.preferences_outputs import (
+                    PreferencesInferenceOutput,
+                )
+
+                return PreferencesInferenceOutput(
+                    proposed_delta=None,
+                    rationale="stub: no preference change",
+                )
             raise NotImplementedError(self.kind)
 
     class _FakeChatLiteLLM:
@@ -482,6 +503,7 @@ async def test_semantic_critic_rejection_triggers_retry(
             mapping = {
                 "QueryCritiqueOutput": "critique",
                 "QueryExplanationOutput": "explain",
+                "PreferencesInferenceOutput": "preferences_infer",
             }
             if name not in mapping:
                 raise NotImplementedError(name)
@@ -533,10 +555,13 @@ async def test_semantic_critic_rejection_triggers_retry(
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
+        "preferences_infer",
         "query_plan",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_execute",
         "query_explain",
@@ -827,6 +852,15 @@ async def test_second_turn_receives_history_in_llm_prompt(
                 return QueryCritiqueOutput(
                     verdict="accept", feedback="ok", risks=[], assumptions=[]
                 )
+            if self.kind == "preferences_infer":
+                from agents.schemas.preferences_outputs import (
+                    PreferencesInferenceOutput,
+                )
+
+                return PreferencesInferenceOutput(
+                    proposed_delta=None,
+                    rationale="stub: no preference change",
+                )
             raise NotImplementedError(self.kind)
 
     class _CapturingLLM:
@@ -835,6 +869,7 @@ async def test_second_turn_receives_history_in_llm_prompt(
                 "QueryPlanOutput": "plan",
                 "SqlGenerationOutput": "sql",
                 "QueryCritiqueOutput": "critique",
+                "PreferencesInferenceOutput": "preferences_infer",
             }
             name = getattr(schema, "__name__", "")
             if name not in mapping:
