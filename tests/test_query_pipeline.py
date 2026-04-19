@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import pytest
 
+from agents.schemas.query_outputs import QueryCritiqueOutput, QueryExplanationOutput
 from graph import get_compiled_graph, graph_run_config
-from graph.query_pipeline import validate_sql_for_execution
+from graph.nodes.query_nodes import validate_sql_for_execution
 from tests.schema_presence_stubs import ReadySchemaPresence
 
 
@@ -98,7 +100,10 @@ async def test_critic_retry_then_success(
         return "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10"
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
-    monkeypatch.setattr("graph.query_pipeline.build_sql", _build_sql)
+    query_gen_mod = importlib.import_module(
+        "graph.nodes.query_nodes.query_generate_sql"
+    )
+    monkeypatch.setattr(query_gen_mod, "build_sql", _build_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-retry-1", run_kind="pytest")
@@ -157,7 +162,10 @@ async def test_refinement_cap_skips_mcp_execute(
         return "SELECT 1"
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
-    monkeypatch.setattr("graph.query_pipeline.build_sql", _bad_sql)
+    query_gen_mod = importlib.import_module(
+        "graph.nodes.query_nodes.query_generate_sql"
+    )
+    monkeypatch.setattr(query_gen_mod, "build_sql", _bad_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-cap-1", run_kind="pytest")
@@ -285,3 +293,188 @@ async def test_query_explain_uses_mcp_error_message(
 
     assert result.get("last_error") == expected_msg
     assert result.get("last_result") is None
+
+
+@pytest.mark.asyncio
+async def test_semantic_critic_rejects_then_retry_succeeds(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": True,
+                "rows_returned": 1,
+                "rows": [{"n": 200}],
+                "columns": ["n"],
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    class _StructuredRunnable:
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+
+        async def ainvoke(self, _messages: list[Any]) -> Any:
+            if self.kind == "critique":
+                call_index = len(critique_calls)
+                critique_calls.append(call_index)
+                if call_index == 0:
+                    return QueryCritiqueOutput(
+                        verdict="reject",
+                        feedback="SQL counts actors instead of rentals.",
+                        risks=["Wrong table focus."],
+                        assumptions=[],
+                    )
+                return QueryCritiqueOutput(
+                    verdict="accept",
+                    feedback="SQL matches the user request.",
+                    risks=[],
+                    assumptions=[],
+                )
+            if self.kind == "explain":
+                return QueryExplanationOutput(
+                    explanation=(
+                        "The query returns a preview row with the computed count."
+                    ),
+                    limitations="Preview only; results may be truncated by LIMIT.",
+                    follow_up_suggestions=[],
+                )
+            raise NotImplementedError(self.kind)
+
+    class _FakeChatLiteLLM:
+        def with_structured_output(self, schema: type[Any]) -> _StructuredRunnable:
+            name = getattr(schema, "__name__", "")
+            mapping = {
+                "QueryCritiqueOutput": "critique",
+                "QueryExplanationOutput": "explain",
+            }
+            if name not in mapping:
+                raise NotImplementedError(name)
+            return _StructuredRunnable(mapping[name])
+
+    def _fake_create_chat_llm(
+        settings: Any = None,
+        *,
+        temperature: float | None = None,
+    ) -> _FakeChatLiteLLM:
+        return _FakeChatLiteLLM()
+
+    critique_calls: list[int] = []
+    sql_calls: list[int] = []
+
+    async def _build_sql(
+        _ui: str,
+        _qp: dict[str, Any] | None,
+        _sc: dict[str, Any] | None,
+        rc: int,
+        **_kw: Any,
+    ) -> str:
+        sql_calls.append(rc)
+        if rc == 0:
+            return "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10"
+        return "SELECT COUNT(*)::bigint AS n FROM public.rental LIMIT 10"
+
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
+    query_gen_mod = importlib.import_module(
+        "graph.nodes.query_nodes.query_generate_sql"
+    )
+    monkeypatch.setattr(query_gen_mod, "build_sql", _build_sql)
+    monkeypatch.setattr("agents.query_agent.create_chat_llm", _fake_create_chat_llm)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(
+        thread_id="query-semantic-retry-1",
+        run_kind="pytest",
+    )
+    result = await app.ainvoke(
+        {"user_input": "count rentals", "steps": [], **state_seed},
+        config=cfg,
+    )
+
+    assert result.get("steps") == [
+        "memory_load_user",
+        "gate:query_path",
+        "query_load_context",
+        "query_plan",
+        "query_generate_sql",
+        "query_critic",
+        "query_generate_sql",
+        "query_critic",
+        "query_execute",
+        "query_explain",
+        "memory_update_session",
+    ]
+    assert sql_calls == [0, 1]
+    assert critique_calls == [0, 1]
+    assert int(result.get("refinement_count") or 0) == 1
+    lr = result.get("last_result")
+    assert isinstance(lr, dict)
+    assert lr.get("sql") == "SELECT COUNT(*)::bigint AS n FROM public.rental LIMIT 10"
+    assert result.get("last_error") is None
+
+
+@pytest.mark.asyncio
+async def test_query_explain_falls_back_when_llm_fails(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": True,
+                "rows_returned": 1,
+                "rows": [{"n": 1}],
+                "columns": ["n"],
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    async def _boom(
+        _user_input: str,
+        _sql: str,
+        *,
+        query_execution_result: dict[str, Any],
+        schema_docs_warning: str | None = None,
+        query_plan: dict[str, Any] | None = None,
+        preferences: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        raise RuntimeError("explanation unavailable")
+
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
+    explain_mod = importlib.import_module("graph.nodes.query_nodes.query_explain")
+    monkeypatch.setattr(explain_mod, "build_query_explanation", _boom)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(
+        thread_id="query-explain-fallback-1",
+        run_kind="pytest",
+    )
+    result = await app.ainvoke(
+        {"user_input": "show actor count", "steps": [], **state_seed},
+        config=cfg,
+    )
+
+    assert result.get("last_error") is None
+    lr = result.get("last_result")
+    assert isinstance(lr, dict)
+    explanation = lr.get("explanation")
+    limitations = lr.get("limitations")
+    assert isinstance(explanation, str)
+    assert "show actor count" in explanation
+    assert isinstance(limitations, str)
+    assert "Read-only SELECT with LIMIT" in limitations

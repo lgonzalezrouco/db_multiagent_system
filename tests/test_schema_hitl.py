@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 from typing import Any
 
 import pytest
@@ -52,7 +53,10 @@ async def test_schema_path_interrupt_resume_persist(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeSchemaDocsStore.captured = []
-    monkeypatch.setattr("graph.schema_pipeline.SchemaDocsStore", _FakeSchemaDocsStore)
+    schema_persist_mod = importlib.import_module(
+        "graph.nodes.schema_nodes.schema_persist"
+    )
+    monkeypatch.setattr(schema_persist_mod, "SchemaDocsStore", _FakeSchemaDocsStore)
 
     class _InspectTool:
         name = "inspect_schema"
@@ -142,7 +146,10 @@ async def test_inspect_schema_called_once_across_hitl_resume(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _FakeSchemaDocsStore.captured = []
-    monkeypatch.setattr("graph.schema_pipeline.SchemaDocsStore", _FakeSchemaDocsStore)
+    schema_persist_mod = importlib.import_module(
+        "graph.nodes.schema_nodes.schema_persist"
+    )
+    monkeypatch.setattr(schema_persist_mod, "SchemaDocsStore", _FakeSchemaDocsStore)
 
     calls: list[int] = []
 

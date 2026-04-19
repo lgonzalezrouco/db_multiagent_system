@@ -10,8 +10,7 @@ from langgraph.graph import END, START, StateGraph
 
 from config.memory_settings import AppMemorySettings
 from graph.memory_nodes import memory_load_user, memory_update_session
-from graph.presence import DbSchemaPresence, SchemaPresence
-from graph.query_pipeline import (
+from graph.nodes.query_nodes import (
     query_critic,
     query_execute,
     query_explain,
@@ -21,12 +20,13 @@ from graph.query_pipeline import (
     query_refine_cap,
     route_after_critic,
 )
-from graph.schema_pipeline import (
+from graph.nodes.schema_nodes import (
     schema_draft,
     schema_hitl,
     schema_inspect,
     schema_persist,
 )
+from graph.presence import DbSchemaPresence, SchemaPresence
 from graph.state import GraphState
 
 

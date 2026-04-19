@@ -16,7 +16,12 @@ from langchain_core.messages import BaseMessage
 from pytest import Config
 
 from agents.prompts.schema import INSPECT_METADATA_SENTINEL
-from agents.schemas.query_outputs import QueryPlanOutput, SqlGenerationOutput
+from agents.schemas.query_outputs import (
+    QueryCritiqueOutput,
+    QueryExplanationOutput,
+    QueryPlanOutput,
+    SqlGenerationOutput,
+)
 from agents.schemas.schema_outputs import ColumnDraft, SchemaDraftOutput, TableDraft
 
 
@@ -109,6 +114,24 @@ def _stub_create_chat_llm(
                 )
             if self.kind == "schema":
                 return _draft_from_inspect_metadata(blob)
+            if self.kind == "critique":
+                return QueryCritiqueOutput(
+                    verdict="accept",
+                    feedback="unit-test stub semantic critic accepts the SQL",
+                    risks=[],
+                    assumptions=[],
+                )
+            if self.kind == "explain":
+                return QueryExplanationOutput(
+                    explanation=(
+                        "unit-test stub explanation for the executed query result"
+                    ),
+                    limitations=(
+                        "Read-only SELECT with LIMIT; "
+                        "MCP may truncate rows (server row cap)."
+                    ),
+                    follow_up_suggestions=[],
+                )
             raise NotImplementedError(self.kind)
 
     class _FakeChatLiteLLM:
@@ -118,6 +141,8 @@ def _stub_create_chat_llm(
                 "QueryPlanOutput": "plan",
                 "SqlGenerationOutput": "sql",
                 "SchemaDraftOutput": "schema",
+                "QueryCritiqueOutput": "critique",
+                "QueryExplanationOutput": "explain",
             }
             if name not in mapping:
                 raise NotImplementedError(name)

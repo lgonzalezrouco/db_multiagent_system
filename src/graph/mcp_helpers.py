@@ -9,27 +9,6 @@ from langchain_mcp_adapters.client import MultiServerMCPClient
 from pydantic import ValidationError
 
 from config import MCPSettings
-from graph.state import GraphState
-
-
-def inspect_schema_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Short summary for ``GraphState.last_result`` after ``inspect_schema``."""
-    if not payload:
-        return {"kind": "inspect_schema", "success": False, "detail": "no_payload"}
-    if payload.get("success"):
-        tables = payload.get("tables") or []
-        return {
-            "kind": "inspect_schema",
-            "success": True,
-            "table_count": len(tables),
-        }
-    err = payload.get("error")
-    err_type = err.get("type", "unknown") if isinstance(err, dict) else "unknown"
-    return {
-        "kind": "inspect_schema",
-        "success": False,
-        "error_type": err_type,
-    }
 
 
 def tool_result_to_dict(raw: Any) -> dict[str, Any] | None:
@@ -60,13 +39,6 @@ def tool_result_to_dict(raw: Any) -> dict[str, Any] | None:
             return None
         return json_object_from_text(combined)
     return None
-
-
-def user_input_preview(state: GraphState, *, max_len: int = 120) -> str:
-    raw = state.get("user_input", "") or ""
-    if len(raw) <= max_len:
-        return raw
-    return raw[: max_len - 3] + "..."
 
 
 def format_settings_validation_error(exc: ValidationError) -> str:
