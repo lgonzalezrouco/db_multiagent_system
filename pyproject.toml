@@ -3,7 +3,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agents", "src/config", "src/graph", "src/llm", "src/memory", "src/mcp_server", "src/utils"]
+packages = [
+    "src/agents",
+    "src/config",
+    "src/graph",
+    "src/llm",
+    "src/memory",
+    "src/mcp_server",
+    "src/ui",
+    "src/utils",
+]
 
 [project]
 name = "db-multiagent-system"
@@ -19,6 +28,7 @@ dependencies = [
     "mcp>=1.27.0",
     "psycopg[binary]>=3.3.3",
     "pydantic-settings>=2.13.1",
+    "streamlit>=1.56.0",
 ]
 
 [tool.ruff]
@@ -59,7 +69,7 @@ dev = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agents", "config", "graph", "llm", "memory", "mcp_server", "tests", "utils"]
+known-first-party = ["agents", "config", "graph", "llm", "memory", "mcp_server", "tests", "ui", "utils"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

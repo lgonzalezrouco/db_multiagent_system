@@ -15,6 +15,7 @@ from pydantic import ValidationError
 
 from config import PostgresSettings
 from graph import get_compiled_graph, graph_run_config
+from graph.invoke_v2 import unwrap_graph_v2
 
 logger = logging.getLogger(__name__)
 
@@ -54,18 +55,6 @@ def _bootstrap() -> int:
         logger.error("Postgres connection failed: %s", exc)
         return 1
     return 0
-
-
-def _unwrap_graph_v2(result: Any) -> tuple[dict[str, Any], tuple[Any, ...]]:
-    """Return (state_dict, interrupts) for ``ainvoke(..., version='v2')`` results."""
-    if isinstance(result, dict):
-        return result, ()
-    value = getattr(result, "value", None)
-    interrupts = getattr(result, "interrupts", ()) or ()
-    if not isinstance(value, dict):
-        msg = f"unexpected graph result type: {type(result).__name__}"
-        raise TypeError(msg)
-    return value, interrupts
 
 
 def _print_query_answer(payload: dict[str, Any]) -> None:
@@ -148,7 +137,7 @@ async def _run_turn_with_hitl(
 ) -> dict[str, Any]:
     out = await app.ainvoke(input_arg, config=config, version="v2")
     while True:
-        state, interrupts = _unwrap_graph_v2(out)
+        state, interrupts = unwrap_graph_v2(out)
         if not interrupts:
             return state
         intr = interrupts[0]
