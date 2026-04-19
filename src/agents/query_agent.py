@@ -1,4 +1,8 @@
-"""Natural-language → plan → SQL via LiteLLM + structured outputs."""
+"""Natural-language → plan → SQL via LiteLLM + structured outputs.
+
+Also contains the preferences-inference builder, which shares the same LLM
+factory and message-construction patterns as the query builders.
+"""
 
 from __future__ import annotations
 
@@ -8,6 +12,10 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agents.prompts.preferences import (
+    PREFERENCES_INFERENCE_INSTRUCTIONS,
+    PREFERENCES_SYSTEM_MESSAGE,
+)
 from agents.prompts.query import (
     QUERY_CRITIC_INSTRUCTIONS,
     QUERY_EXPLAIN_INSTRUCTIONS,
@@ -15,6 +23,7 @@ from agents.prompts.query import (
     QUERY_SQL_INSTRUCTIONS,
     QUERY_SYSTEM_MESSAGE,
 )
+from agents.schemas.preferences_outputs import PreferencesInferenceOutput
 from agents.schemas.query_outputs import (
     QueryCritiqueOutput,
     QueryExplanationOutput,
@@ -22,8 +31,12 @@ from agents.schemas.query_outputs import (
     SqlGenerationOutput,
 )
 from llm.factory import create_chat_llm
+from memory.preferences import _DEFAULTS as _CANONICAL_KEYS
 
 logger = logging.getLogger(__name__)
+
+# Keys the LLM is allowed to propose changes for.
+ALLOWED_PREF_KEYS: frozenset[str] = frozenset(_CANONICAL_KEYS)
 
 
 def _compact_json(data: Any, *, max_chars: int = 12000) -> str:
@@ -40,6 +53,28 @@ def _history_block(conversation_history: list[dict] | None) -> str | None:
     return "Conversation history (JSON, oldest-first):\n" + _compact_json(
         conversation_history
     )
+
+
+def _history_summary(conversation_history: list[dict] | None) -> str | None:
+    """Condensed history block (user_input only) to reduce token cost."""
+    if not conversation_history:
+        return None
+    lines = [
+        f"- {turn.get('user_input', '')}"
+        for turn in conversation_history[-3:]
+        if isinstance(turn, dict)
+    ]
+    if not lines:
+        return None
+    return "Recent conversation context (user messages only):\n" + "\n".join(lines)
+
+
+def _sanitize_delta(raw_delta: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Strip any keys not in the canonical set; return None if nothing remains."""
+    if not raw_delta:
+        return None
+    cleaned = {k: v for k, v in raw_delta.items() if k in ALLOWED_PREF_KEYS}
+    return cleaned if cleaned else None
 
 
 async def build_query_plan(
@@ -200,3 +235,68 @@ async def build_query_explanation(
     raw = await structured.ainvoke(messages)
     result = QueryExplanationOutput.model_validate(raw)
     return result.model_dump(mode="json")
+
+
+async def infer_preferences_delta(
+    user_input: str,
+    *,
+    current_preferences: dict[str, Any] | None = None,
+    conversation_history: list[dict] | None = None,
+) -> PreferencesInferenceOutput:
+    """Detect whether the user intends to change a persistent preference.
+
+    Returns a :class:`PreferencesInferenceOutput` with:
+    - ``proposed_delta``: a dict of only the keys to change, or ``None``
+    - ``rationale``: explanation of the decision
+
+    The delta is sanitized to remove any keys outside the canonical set, so
+    callers can trust the result is safe to pass to ``UserPreferencesStore.patch``.
+    Never raises: any LLM error produces a null delta (soft-fail).
+    """
+    llm = create_chat_llm()
+    structured = llm.with_structured_output(PreferencesInferenceOutput)
+
+    human_parts = [
+        PREFERENCES_INFERENCE_INSTRUCTIONS,
+        f"User message:\n{(user_input or '').strip() or '(empty)'}",
+    ]
+    if current_preferences is not None:
+        human_parts.append(
+            "Current preferences (JSON):\n"
+            + _compact_json(current_preferences, max_chars=4000),
+        )
+    history_str = _history_summary(conversation_history)
+    if history_str:
+        human_parts.append(history_str)
+
+    messages = [
+        SystemMessage(content=PREFERENCES_SYSTEM_MESSAGE),
+        HumanMessage(content="\n\n".join(human_parts)),
+    ]
+
+    try:
+        raw = await structured.ainvoke(messages)
+        result = PreferencesInferenceOutput.model_validate(raw)
+    except Exception:
+        logger.exception("preferences_inference_failed")
+        return PreferencesInferenceOutput(
+            proposed_delta=None,
+            rationale="Inference call failed; no preference change proposed.",
+        )
+
+    sanitized = _sanitize_delta(result.proposed_delta)
+    if sanitized != result.proposed_delta:
+        logger.warning(
+            "preferences_delta_contained_unknown_keys",
+            extra={
+                "raw_keys": sorted(result.proposed_delta.keys())
+                if result.proposed_delta
+                else [],
+                "sanitized_keys": sorted(sanitized.keys()) if sanitized else [],
+            },
+        )
+
+    return PreferencesInferenceOutput(
+        proposed_delta=sanitized,
+        rationale=result.rationale,
+    )

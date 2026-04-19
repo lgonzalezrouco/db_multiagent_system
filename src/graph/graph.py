@@ -12,6 +12,9 @@ from langgraph.graph import END, START, StateGraph
 from config.memory_settings import AppMemorySettings
 from graph.memory_nodes import memory_load_user, memory_update_session
 from graph.nodes.query_nodes import (
+    preferences_hitl,
+    preferences_infer,
+    preferences_persist,
     query_critic,
     query_execute,
     query_explain,
@@ -20,6 +23,8 @@ from graph.nodes.query_nodes import (
     query_plan,
     query_refine_cap,
     route_after_critic,
+    route_after_preferences_hitl,
+    route_after_preferences_infer,
 )
 from graph.nodes.schema_nodes import (
     schema_draft,
@@ -139,6 +144,9 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     # Query path nodes
     workflow.add_node("memory_load_user", memory_load_user)
     workflow.add_node("query_load_context", query_load_context)
+    workflow.add_node("preferences_infer", preferences_infer)
+    workflow.add_node("preferences_hitl", preferences_hitl)
+    workflow.add_node("preferences_persist", preferences_persist)
     workflow.add_node("query_plan", query_plan)
     workflow.add_node("query_generate_sql", query_generate_sql)
     workflow.add_node("query_critic", query_critic)
@@ -168,7 +176,18 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
 
     # Query path edges
     workflow.add_edge("memory_load_user", "query_load_context")
-    workflow.add_edge("query_load_context", "query_plan")
+    workflow.add_edge("query_load_context", "preferences_infer")
+    workflow.add_conditional_edges(
+        "preferences_infer",
+        route_after_preferences_infer,
+        {"preferences_hitl": "preferences_hitl", "query_plan": "query_plan"},
+    )
+    workflow.add_conditional_edges(
+        "preferences_hitl",
+        route_after_preferences_hitl,
+        {"preferences_persist": "preferences_persist", "query_plan": "query_plan"},
+    )
+    workflow.add_edge("preferences_persist", "query_plan")
     workflow.add_edge("query_plan", "query_generate_sql")
     workflow.add_edge("query_generate_sql", "query_critic")
     workflow.add_conditional_edges(
@@ -193,6 +212,13 @@ def get_compiled_graph(
     presence: SchemaPresence | None = None,
     checkpointer: Any | None = None,
 ):
-    """Return a compiled graph with ``MemorySaver`` by default (required for HITL)."""
+    """Return a compiled graph with ``MemorySaver`` by default (required for HITL).
+
+    Both ``schema_hitl`` and ``preferences_hitl`` are interrupt boundaries;
+    callers resume them by invoking the graph with the approved payload.
+    """
     ckpt = checkpointer if checkpointer is not None else MemorySaver()
-    return build_graph(presence=presence).compile(checkpointer=ckpt)
+    return build_graph(presence=presence).compile(
+        checkpointer=ckpt,
+        interrupt_before=["schema_hitl", "preferences_hitl"],
+    )
