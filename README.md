@@ -11,11 +11,11 @@ A **natural-language query system** over PostgreSQL built with **LangGraph**, tw
 
 ## Architecture
 
-Runtime view: **one CLI process** runs `main.py`, compiles a **LangGraph** workflow (with **`MemorySaver`** for HITL/thread state), calls a **LiteLLM**-compatible API via **`ChatLiteLLM`**, and reaches the dataset through an **MCP** server (HTTP) using **`MultiServerMCPClient`** from **`langchain-mcp-adapters`**. Persisted app state (schema docs + user preferences) lives in a **separate Postgres** instance from the **DVD Rental** database the MCP tools query.
+Runtime view: the same compiled **LangGraph** workflow runs from **Streamlit** ([`src/ui/app.py`](src/ui/app.py)) or the **CLI** ([`main.py`](main.py)) — with **`MemorySaver`** for HITL/thread state, **LiteLLM** via **`ChatLiteLLM`**, and the **DVD Rental** database reached through an **MCP** server (HTTP) using **`MultiServerMCPClient`** from **`langchain-mcp-adapters`**. Persisted app state (schema docs + user preferences) lives in a **separate Postgres** instance from the dataset the MCP tools query.
 
 ```mermaid
 flowchart TB
-    U([User / main.py])
+    U([User / Streamlit or CLI])
 
     subgraph LG["LangGraph + MemorySaver"]
         Gate{Schema docs ready?}
@@ -99,6 +99,16 @@ uv run python main.py --no-bootstrap
 
 On first run (no schema docs persisted yet) the system automatically goes through the **Schema Pipeline**: it inspects the database, drafts descriptions with the LLM, then pauses for your approval before writing anything. After you approve, subsequent runs go straight to the **Query Pipeline**.
 
+### 5. Streamlit UI
+
+The web UI uses the **same** compiled graph, checkpointing, and `graph_run_config` as the CLI, with **`run_kind="streamlit"`** so LangSmith traces can be filtered separately from CLI runs. Schema HITL is handled in the browser (approve or edit JSON) instead of the terminal.
+
+```bash
+uv run streamlit run src/ui/app.py
+```
+
+Use the same `.env` / Docker setup as above. Optional: set **`DEFAULT_THREAD_ID`** to pin the LangGraph thread for the session; otherwise the UI generates a stable id per browser session. **New chat** in the sidebar starts a fresh thread id and clears the transcript.
+
 ---
 
 ## Environment variables
@@ -140,6 +150,8 @@ uv run python main.py -q "How many actors are there?"
 
 Open your [LangSmith](https://smith.langchain.com/) project (same name as `LANGSMITH_PROJECT`, default `dvdrental-local` in `.env.example`) and inspect the run tree: graph nodes, LLM calls, and MCP tools such as `execute_readonly_sql` nested under the same invocation. Use `LANGSMITH_ENDPOINT` only for EU or self-hosted deployments.
 
+Filter UI vs CLI using trace metadata **`run_kind`** (`streamlit` from Streamlit, `cli` from `main.py`).
+
 The CLI still emits **errors and warnings** to stderr; LangSmith remains the primary place for full run trees and spans.
 
 ---
@@ -148,7 +160,7 @@ The CLI still emits **errors and warnings** to stderr; LangSmith remains the pri
 
 ```text
 .
-├── main.py                      # CLI: Postgres bootstrap + LangGraph REPL / HITL resume
+├── main.py                      # CLI: Postgres bootstrap + LangGraph REPL / HITL resume (dev/testing)
 ├── pyproject.toml               # uv / hatch packages under src/*, Ruff, pytest markers
 ├── uv.lock
 ├── docker-compose.yml           # postgres (dvdrental), postgres-app-memory, mcp-server
@@ -169,6 +181,7 @@ The CLI still emits **errors and warnings** to stderr; LangSmith remains the pri
 │   ├── config/                  # pydantic-settings: postgres, app memory, MCP, LLM
 │   ├── graph/
 │   │   ├── graph.py             # StateGraph wiring, MemorySaver, graph_run_config()
+│   │   ├── invoke_v2.py         # unwrap_graph_v2 (CLI + Streamlit, version="v2")
 │   │   ├── state.py             # GraphState
 │   │   ├── presence.py          # DbSchemaPresence — gate on schema_docs
 │   │   ├── schema_pipeline.py   # schema_inspect … schema_persist
@@ -187,6 +200,9 @@ The CLI still emits **errors and warnings** to stderr; LangSmith remains the pri
 │   │   ├── tools.py             # inspect_schema, execute_readonly_sql
 │   │   ├── readonly_sql.py      # Read-only SQL guard
 │   │   └── schema_metadata.py   # information_schema introspection
+│   ├── ui/
+│   │   ├── app.py               # Streamlit: chat + schema HITL (same graph as main.py)
+│   │   └── formatters.py        # Markdown helpers for query answers / errors
 │   └── utils/
 │       └── postgres.py          # Shared psycopg helpers
 └── tests/                       # pytest (unit + integration markers)
