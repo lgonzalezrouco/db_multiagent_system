@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -28,6 +29,8 @@ from graph.nodes.schema_nodes import (
 )
 from graph.presence import DbSchemaPresence, SchemaPresence
 from graph.state import GraphState
+
+logger = logging.getLogger(__name__)
 
 
 def _merge_trace_tags(base_tags: list[str] | None, *, run_kind: str) -> list[str]:
@@ -103,6 +106,19 @@ def graph_run_config(
     return config, state_seed
 
 
+def route_after_persist(state: GraphState) -> str:
+    """After schema_persist: pivot to query pipeline if a user query is waiting."""
+    if state.get("persist_error"):
+        logger.warning(
+            "schema_to_query_pivot skipped: persist_error=%r",
+            state.get("persist_error"),
+        )
+        return "end"
+    if (state.get("user_input") or "").strip():
+        return "query_path"
+    return "end"
+
+
 def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     """Build workflow with conditional routing from ``START``."""
     resolved: SchemaPresence = presence or DbSchemaPresence.from_settings()
@@ -144,7 +160,11 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     workflow.add_edge("schema_inspect", "schema_draft")
     workflow.add_edge("schema_draft", "schema_hitl")
     workflow.add_edge("schema_hitl", "schema_persist")
-    workflow.add_edge("schema_persist", END)
+    workflow.add_conditional_edges(
+        "schema_persist",
+        route_after_persist,
+        {"query_path": "memory_load_user", "end": END},
+    )
 
     # Query path edges
     workflow.add_edge("memory_load_user", "query_load_context")

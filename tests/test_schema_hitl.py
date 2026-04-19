@@ -88,7 +88,7 @@ async def test_schema_path_interrupt_resume_persist(
     app = get_compiled_graph(presence=NotReadySchemaPresence())
 
     out1 = await app.ainvoke(
-        {"user_input": "ignored for routing", "steps": []},
+        {"user_input": "", "steps": []},
         config=cfg,
         version="v2",
     )
