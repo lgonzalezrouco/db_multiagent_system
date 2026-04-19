@@ -1,4 +1,4 @@
-"""Unit tests for memory: stores, session helpers, memory nodes."""
+"""Unit tests for memory: stores, session helpers, memory nodes, state models."""
 
 from __future__ import annotations
 
@@ -7,9 +7,24 @@ import pytest
 
 from graph.memory_nodes import memory_load_user, memory_update_session
 from graph.presence import DbSchemaPresence, SchemaPresenceResult
-from graph.state import GraphState, MemoryState, QueryPipelineState
+from graph.state import (
+    ConversationTurn,
+    GraphState,
+    MemoryState,
+    QueryPipelineState,
+    SchemaPipelineState,
+    append_steps,
+    merge_submodel,
+)
 from memory.preferences import default_preferences
-from memory.session import seed_session_fields, snapshot_session_fields
+from memory.session import (
+    HISTORY_MAX_TURNS,
+    HISTORY_ROW_VALUE_MAX_CHARS,
+    HISTORY_ROWS_PREVIEW,
+    _trim_rows,
+    seed_session_fields,
+    snapshot_session_fields,
+)
 
 # ---------------------------------------------------------------------------
 # default_preferences
@@ -104,7 +119,6 @@ def test_snapshot_session_fields_skips_when_no_sql() -> None:
 def test_snapshot_caps_history_at_max_turns() -> None:
     """Snapshot enforces the HISTORY_MAX_TURNS cap (oldest discarded)."""
     from graph.state import ConversationTurn
-    from memory.session import HISTORY_MAX_TURNS
 
     existing = [
         ConversationTurn(user_input=f"q{i}", sql=f"SELECT {i} LIMIT 1")
@@ -447,3 +461,160 @@ async def test_memory_update_session_skips_upsert_on_db_error(
     # Then: warning is set
     assert result.get("memory", {}).get("warning") is not None
     assert "could not persist" in result["memory"]["warning"]
+
+
+# ---------------------------------------------------------------------------
+# append_steps reducer
+# ---------------------------------------------------------------------------
+
+
+def test_append_steps_extends_list() -> None:
+    assert append_steps(["a", "b"], ["c"]) == ["a", "b", "c"]
+
+
+def test_append_steps_empty_update_returns_current() -> None:
+    assert append_steps(["a"], []) == ["a"]
+
+
+def test_append_steps_none_update_returns_current() -> None:
+    assert append_steps(["a"], None) == ["a"]  # type: ignore[arg-type]
+
+
+def test_append_steps_does_not_mutate_original() -> None:
+    original = ["a", "b"]
+    append_steps(original, ["c"])
+    assert original == ["a", "b"]
+
+
+# ---------------------------------------------------------------------------
+# merge_submodel reducer
+# ---------------------------------------------------------------------------
+
+
+def test_merge_submodel_none_update_returns_current() -> None:
+    current = QueryPipelineState(generated_sql="SELECT 1")
+    assert merge_submodel(current, None) is current
+
+
+def test_merge_submodel_dict_overwrites_specified_fields() -> None:
+    current = QueryPipelineState(generated_sql="SELECT 1", refinement_count=0)
+    result = merge_submodel(
+        current, {"generated_sql": "SELECT 2", "refinement_count": 1}
+    )
+    assert result.generated_sql == "SELECT 2"
+    assert result.refinement_count == 1
+
+
+def test_merge_submodel_preserves_unspecified_fields() -> None:
+    current = QueryPipelineState(
+        generated_sql="SELECT 1", plan={"intent": "explore"}, refinement_count=2
+    )
+    result = merge_submodel(current, {"generated_sql": "SELECT 2"})
+    assert result.plan == {"intent": "explore"}
+    assert result.refinement_count == 2
+
+
+def test_merge_submodel_basemodel_only_sets_explicitly_set_fields() -> None:
+    current = QueryPipelineState(generated_sql="SELECT 1", refinement_count=3)
+    update = QueryPipelineState(generated_sql="SELECT 2")
+    result = merge_submodel(current, update)
+    assert result.generated_sql == "SELECT 2"
+    assert result.refinement_count == 3  # not overwritten
+
+
+def test_merge_submodel_schema_preserves_unset() -> None:
+    current = SchemaPipelineState(ready=True, metadata={"tables": []})
+    result = merge_submodel(current, {"persist_error": "DB down"})
+    assert result.ready is True
+    assert result.persist_error == "DB down"
+
+
+# ---------------------------------------------------------------------------
+# GraphState / sub-model defaults
+# ---------------------------------------------------------------------------
+
+
+def test_graph_state_defaults() -> None:
+    state = GraphState()
+    assert state.user_input == ""
+    assert state.steps == []
+    assert isinstance(state.schema, SchemaPipelineState)
+    assert isinstance(state.query, QueryPipelineState)
+    assert isinstance(state.memory, MemoryState)
+
+
+def test_conversation_turn_defaults() -> None:
+    t = ConversationTurn(user_input="test")
+    assert t.sql is None
+    assert t.row_count is None
+    assert t.rows_preview == []
+    assert t.explanation is None
+
+
+# ---------------------------------------------------------------------------
+# _trim_rows helper
+# ---------------------------------------------------------------------------
+
+
+def test_trim_rows_keeps_up_to_preview_limit() -> None:
+    result = {"rows": [{"n": i} for i in range(10)]}
+    rows = _trim_rows(result)
+    assert len(rows) <= HISTORY_ROWS_PREVIEW
+
+
+def test_trim_rows_truncates_long_string_values() -> None:
+    long_val = "x" * (HISTORY_ROW_VALUE_MAX_CHARS + 50)
+    rows = _trim_rows({"rows": [{"title": long_val}]})
+    assert len(rows[0]["title"]) == HISTORY_ROW_VALUE_MAX_CHARS
+
+
+def test_trim_rows_preserves_non_string_values() -> None:
+    rows = _trim_rows({"rows": [{"n": 42, "f": 0.5, "x": None}]})
+    assert rows[0] == {"n": 42, "f": 0.5, "x": None}
+
+
+def test_trim_rows_returns_empty_for_none_input() -> None:
+    assert _trim_rows(None) == []
+
+
+# ---------------------------------------------------------------------------
+# snapshot row preview and row_count
+# ---------------------------------------------------------------------------
+
+
+def test_snapshot_includes_row_preview() -> None:
+    state = GraphState(
+        user_input="actors",
+        query=QueryPipelineState(
+            generated_sql="SELECT * FROM actor LIMIT 5",
+            execution_result={
+                "success": True,
+                "rows_returned": 3,
+                "rows": [
+                    {"first_name": "Nick"},
+                    {"first_name": "Ed"},
+                    {"first_name": "Jennifer"},
+                ],
+            },
+        ),
+    )
+    delta = snapshot_session_fields(state)
+    turn = delta["memory"]["conversation_history"][0]
+    assert len(turn.rows_preview) == min(3, HISTORY_ROWS_PREVIEW)
+    assert turn.rows_preview[0]["first_name"] == "Nick"
+
+
+def test_snapshot_extracts_row_count() -> None:
+    state = GraphState(
+        user_input="count",
+        query=QueryPipelineState(
+            generated_sql="SELECT COUNT(*) LIMIT 1",
+            execution_result={
+                "success": True,
+                "rows_returned": 42,
+                "rows": [{"n": 42}],
+            },
+        ),
+    )
+    delta = snapshot_session_fields(state)
+    assert delta["memory"]["conversation_history"][0].row_count == 42

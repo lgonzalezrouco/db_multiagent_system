@@ -752,3 +752,163 @@ async def test_explain_falls_back_when_llm_fails(
     assert "show actor count" in explanation
     assert isinstance(limitations, str)
     assert "Read-only SELECT with LIMIT" in limitations
+
+
+# ---------------------------------------------------------------------------
+# Conversation history (iterative refinement)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_two_turns_accumulate_conversation_history(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """conversation_history grows turn-by-turn and survives the checkpointer."""
+
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": True,
+                "rows_returned": 2,
+                "rows": [{"actor_id": 1, "first_name": "Nick"}],
+                "columns": ["actor_id", "first_name"],
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(
+        thread_id="two-turn-history-1", run_kind="pytest"
+    )
+
+    q1 = "Which actors worked with Nick Wahlberg?"
+    q2 = "Now show me his movies."
+
+    # Turn 1
+    out1 = await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
+    state1 = _unwrap_state(out1)
+    assert state1.last_error is None
+    assert len(state1.memory.conversation_history) == 1
+    assert state1.memory.conversation_history[0].user_input == q1
+
+    # Turn 2
+    out2 = await app.ainvoke({"user_input": q2, "steps": [], **state_seed}, config=cfg)
+    state2 = _unwrap_state(out2)
+    assert state2.last_error is None
+    assert len(state2.memory.conversation_history) == 2
+    assert state2.memory.conversation_history[1].user_input == q2
+
+
+@pytest.mark.asyncio
+async def test_second_turn_receives_history_in_llm_prompt(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second turn's plan call has the first turn's context in the human message."""
+    from langchain_core.messages import HumanMessage
+
+    from agents.schemas.query_outputs import (
+        QueryCritiqueOutput,
+        QueryPlanOutput,
+        SqlGenerationOutput,
+    )
+
+    plan_messages_by_turn: list[list[Any]] = []
+
+    class _CapturingRunnable:
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+
+        async def ainvoke(self, messages: list[Any]) -> Any:
+            if self.kind == "plan":
+                plan_messages_by_turn.append(messages)
+                return QueryPlanOutput(
+                    intent="explore",
+                    summary="stub",
+                    relevant_tables=["public.film"],
+                    notes=[],
+                    assumptions=[],
+                )
+            if self.kind == "sql":
+                return SqlGenerationOutput(
+                    sql="SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10",
+                    rationale="stub",
+                )
+            if self.kind == "critique":
+                return QueryCritiqueOutput(
+                    verdict="accept", feedback="ok", risks=[], assumptions=[]
+                )
+            raise NotImplementedError(self.kind)
+
+    class _CapturingLLM:
+        def with_structured_output(self, schema: type[Any]) -> _CapturingRunnable:
+            mapping = {
+                "QueryPlanOutput": "plan",
+                "SqlGenerationOutput": "sql",
+                "QueryCritiqueOutput": "critique",
+            }
+            name = getattr(schema, "__name__", "")
+            if name not in mapping:
+                raise NotImplementedError(name)
+            return _CapturingRunnable(mapping[name])
+
+    monkeypatch.setattr(
+        "agents.query_agent.create_chat_llm", lambda *a, **kw: _CapturingLLM()
+    )
+
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": True,
+                "rows_returned": 1,
+                "rows": [{"n": 5}],
+                "columns": ["n"],
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(
+        thread_id="two-turn-history-2", run_kind="pytest"
+    )
+
+    q1 = "Which actors worked with Nick Wahlberg?"
+
+    # Turn 1 — no prior history so no history block expected
+    await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
+    assert len(plan_messages_by_turn) == 1
+    turn1_human = next(
+        (m.content for m in plan_messages_by_turn[0] if isinstance(m, HumanMessage)), ""
+    )
+    assert "Conversation history (JSON" not in turn1_human
+
+    # Turn 2 — must carry turn-1 history in the human message
+    await app.ainvoke(
+        {"user_input": "Now show me his movies.", "steps": [], **state_seed},
+        config=cfg,
+    )
+    assert len(plan_messages_by_turn) == 2
+    turn2_human = next(
+        (m.content for m in plan_messages_by_turn[1] if isinstance(m, HumanMessage)), ""
+    )
+    assert "Conversation history (JSON" in turn2_human
+    assert "Nick Wahlberg" in turn2_human

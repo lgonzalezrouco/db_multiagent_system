@@ -21,7 +21,7 @@ The Query Agent has no conversational memory between turns. Every invocation is 
 
 ### 1.2 Goals
 
-- A user who asks *"Which actors worked with Nick Wahlberg?"* followed by *"Now show me his movies"* receives a SQL query that correctly filters by the actor identified in the previous turn, without re-stating the name.
+- A user who asks _"Which actors worked with Nick Wahlberg?"_ followed by _"Now show me his movies"_ receives a SQL query that correctly filters by the actor identified in the previous turn, without re-stating the name.
 - The `GraphState` type hierarchy reflects the three distinct concerns of the system: **schema pipeline**, **query pipeline**, and **memory/session**, reducing the cognitive overhead of working in any individual node.
 
 ### 1.3 Non-goals
@@ -34,17 +34,17 @@ The Query Agent has no conversational memory between turns. Every invocation is 
 
 ## 2. Scope
 
-| In scope | Out of scope |
-|---|---|
-| Replace `GraphState TypedDict` with `GraphState(BaseModel)` | Changing the LangGraph graph topology |
-| Three nested sub-`BaseModel`s: `schema`, `query`, `memory` | Changing LLM providers or agent logic beyond prompts |
-| `append_steps` reducer + `merge_submodel` reducer | Adding vector/semantic memory |
-| `ConversationTurn` model, capped at 5 entries | Persisting history to `app_memory` DB |
-| Remove legacy single-turn fields (`previous_user_input`, `previous_sql`, `assumptions`, `recent_filters`) | Changing the HITL flow for schema approval |
-| Inject history into plan / SQL / critic prompts | Changing MCP tool contracts |
-| Extend system prompt for pronoun / anaphora resolution | Rewriting prior specs |
-| Migrate all nodes, memory helpers, UI, and CLI to the new shape | — |
-| New tests: reducers, session snapshot, agent history injection, two-turn integration | — |
+| In scope                                                                                                  | Out of scope                                         |
+| --------------------------------------------------------------------------------------------------------- | ---------------------------------------------------- |
+| Replace `GraphState TypedDict` with `GraphState(BaseModel)`                                               | Changing the LangGraph graph topology                |
+| Three nested sub-`BaseModel`s: `schema`, `query`, `memory`                                                | Changing LLM providers or agent logic beyond prompts |
+| `append_steps` reducer + `merge_submodel` reducer                                                         | Adding vector/semantic memory                        |
+| `ConversationTurn` model, capped at 5 entries                                                             | Persisting history to `app_memory` DB                |
+| Remove legacy single-turn fields (`previous_user_input`, `previous_sql`, `assumptions`, `recent_filters`) | Changing the HITL flow for schema approval           |
+| Inject history into plan / SQL / critic prompts                                                           | Changing MCP tool contracts                          |
+| Extend system prompt for pronoun / anaphora resolution                                                    | Rewriting prior specs                                |
+| Migrate all nodes, memory helpers, UI, and CLI to the new shape                                           | —                                                    |
+| New tests: reducers, session snapshot, agent history injection, two-turn integration                      | —                                                    |
 
 ---
 
@@ -110,30 +110,30 @@ class MemoryState(BaseModel):
 
 The following flat `GraphState` fields from Specs 03–07 are **deleted**:
 
-| Removed field | Replaced by |
-|---|---|
-| `schema_ready` | `schema.ready` |
-| `schema_metadata` | `schema.metadata` |
-| `schema_draft` | `schema.draft` |
-| `schema_approved` | `schema.approved` |
-| `hitl_prompt` | `schema.hitl_prompt` |
-| `persist_error` | `schema.persist_error` |
-| `schema_docs_context` | `query.docs_context` |
-| `schema_docs_warning` | `query.docs_warning` |
-| `query_plan` | `query.plan` |
-| `generated_sql` | `query.generated_sql` |
-| `critic_status` | `query.critic_status` |
-| `critic_feedback` | `query.critic_feedback` |
-| `refinement_count` | `query.refinement_count` |
-| `query_execution_result` | `query.execution_result` |
-| `query_explanation` | `query.explanation` |
-| `preferences` | `memory.preferences` |
-| `preferences_dirty` | `memory.preferences_dirty` |
-| `memory_warning` | `memory.warning` |
-| `previous_user_input` | derived from `memory.conversation_history[-1].user_input` |
-| `previous_sql` | derived from `memory.conversation_history[-1].sql` |
-| `assumptions` | removed (no consumer; was never written to) |
-| `recent_filters` | removed (no consumer; was never written to) |
+| Removed field            | Replaced by                                               |
+| ------------------------ | --------------------------------------------------------- |
+| `schema_ready`           | `schema.ready`                                            |
+| `schema_metadata`        | `schema.metadata`                                         |
+| `schema_draft`           | `schema.draft`                                            |
+| `schema_approved`        | `schema.approved`                                         |
+| `hitl_prompt`            | `schema.hitl_prompt`                                      |
+| `persist_error`          | `schema.persist_error`                                    |
+| `schema_docs_context`    | `query.docs_context`                                      |
+| `schema_docs_warning`    | `query.docs_warning`                                      |
+| `query_plan`             | `query.plan`                                              |
+| `generated_sql`          | `query.generated_sql`                                     |
+| `critic_status`          | `query.critic_status`                                     |
+| `critic_feedback`        | `query.critic_feedback`                                   |
+| `refinement_count`       | `query.refinement_count`                                  |
+| `query_execution_result` | `query.execution_result`                                  |
+| `query_explanation`      | `query.explanation`                                       |
+| `preferences`            | `memory.preferences`                                      |
+| `preferences_dirty`      | `memory.preferences_dirty`                                |
+| `memory_warning`         | `memory.warning`                                          |
+| `previous_user_input`    | derived from `memory.conversation_history[-1].user_input` |
+| `previous_sql`           | derived from `memory.conversation_history[-1].sql`        |
+| `assumptions`            | removed (no consumer; was never written to)               |
+| `recent_filters`         | removed (no consumer; was never written to)               |
 
 ---
 
@@ -259,6 +259,7 @@ serialised via `_compact_json` (same truncation mechanism already used for schem
 > When a `Conversation history` block is provided it contains the last few turns of this session, oldest first. Each entry includes the user's question, the SQL that was executed, a sample of rows returned, and a natural-language explanation.
 >
 > Use this context to:
+>
 > - Resolve pronouns and vague references in the current question ("his movies", "those actors", "the same genre", "now filter by ...").
 > - Reuse entities, joins, and filters from prior SQL when they remain applicable to the follow-up.
 > - Recognise when the current question is clearly unrelated to prior turns and ignore history in that case.
@@ -266,6 +267,7 @@ serialised via `_compact_json` (same truncation mechanism already used for schem
 > Do not invent facts beyond what is present in the schema docs, history, and current question.
 
 `QUERY_PLAN_INSTRUCTIONS` and `QUERY_SQL_INSTRUCTIONS` each gain a one-line reminder:
+
 > "If a Conversation history block is present, resolve any anaphoric references before planning."
 
 ---
@@ -416,18 +418,18 @@ Calling `merge_submodel(current, {})` or `merge_submodel(current, None)` returns
 
 ### New test files
 
-| File | What it covers |
-|---|---|
-| `tests/graph/test_state_reducers.py` | `merge_submodel` with dict/BaseModel/None updates; `append_steps`; default construction; unset-field preservation |
-| `tests/memory/test_session.py` | `snapshot_session_fields` appends a `ConversationTurn`; caps at 5 (6th drops oldest); `_trim_rows` keeps ≤3 rows and truncates long strings; schema/error turns do not append |
-| `tests/agents/test_query_agent_history.py` | `build_query_plan`, `build_sql`, `build_query_critique` include the history block in the human message when provided; omit it when `None` or `[]` |
+| File                                       | What it covers                                                                                                                                                                |
+| ------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tests/graph/test_state_reducers.py`       | `merge_submodel` with dict/BaseModel/None updates; `append_steps`; default construction; unset-field preservation                                                             |
+| `tests/memory/test_session.py`             | `snapshot_session_fields` appends a `ConversationTurn`; caps at 5 (6th drops oldest); `_trim_rows` keeps ≤3 rows and truncates long strings; schema/error turns do not append |
+| `tests/agents/test_query_agent_history.py` | `build_query_plan`, `build_sql`, `build_query_critique` include the history block in the human message when provided; omit it when `None` or `[]`                             |
 
 ### Updated test files
 
-| File | Why it changes |
-|---|---|
-| Any test constructing `GraphState` directly | Must use the new `BaseModel` with nested sub-models |
-| Any test asserting on removed flat fields | Must assert on the corresponding sub-model field |
+| File                                                 | Why it changes                                                                                                                                                                            |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Any test constructing `GraphState` directly          | Must use the new `BaseModel` with nested sub-models                                                                                                                                       |
+| Any test asserting on removed flat fields            | Must assert on the corresponding sub-model field                                                                                                                                          |
 | `tests/graph/test_query_pipeline.py` (or equivalent) | Add a two-turn integration test: two turns with shared `thread_id`; second turn's `state.memory.conversation_history` has length 2; the second-turn SQL references the entity from turn 1 |
 
 ### Minimum acceptance criteria
@@ -436,8 +438,8 @@ Calling `merge_submodel(current, {})` or `merge_submodel(current, None)` returns
 - [ ] `uv run ruff format --check .` passes.
 - [ ] `uv run pytest` passes — no regressions on existing tests, new tests all green.
 - [ ] Manual smoke (requires `docker compose up -d`):
-  - Turn 1: *"Which actors worked with Nick Wahlberg?"* → returns SQL + rows.
-  - Turn 2: *"Now show me his movies."* → returns SQL that filters by `Nick Wahlberg` without re-stating the name explicitly.
+  - Turn 1: _"Which actors worked with Nick Wahlberg?"_ → returns SQL + rows.
+  - Turn 2: _"Now show me his movies."_ → returns SQL that filters by `Nick Wahlberg` without re-stating the name explicitly.
 - [ ] `state.memory.conversation_history` after turn 2 has exactly 2 entries.
 
 ---
@@ -467,15 +469,15 @@ No new packages required.
 
 Per [AGENTS.md](../AGENTS.md) (GitHub Flow, Conventional Commits, always-functional increments):
 
-| # | Commit message | What lands |
-|---|---|---|
-| 1 | `refactor(state): introduce pydantic GraphState with nested submodels and reducers` | `src/graph/state.py` full rewrite; `tests/graph/test_state_reducers.py` |
-| 2 | `refactor(nodes): migrate schema pipeline nodes to pydantic state` | All `schema_nodes/`, `graph.py` routing, `graph/__init__.py` |
-| 3 | `refactor(nodes): migrate query pipeline nodes to pydantic state` | All `query_nodes/`, `memory_nodes.py`, `memory/session.py` |
-| 4 | `refactor(memory): replace previous_* fields with MemoryState and ConversationTurn` | `memory/session.py` snapshot logic, `memory_nodes.py`, `tests/memory/test_session.py` |
-| 5 | `feat(query-agent): inject conversation history into plan/sql/critic prompts` | `agents/query_agent.py`, `agents/prompts/query.py`, `query_plan.py`, `query_generate_sql.py`, `query_critic.py`, `tests/agents/test_query_agent_history.py` |
-| 6 | `feat(ui): migrate app and formatters to pydantic state` | `ui/app.py`, `ui/formatters.py`, `main.py` |
-| 7 | `test: add two-turn integration test for iterative refinement` | `tests/graph/test_query_pipeline.py` updated |
+| #   | Commit message                                                                      | What lands                                                                                                                                                  |
+| --- | ----------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `refactor(state): introduce pydantic GraphState with nested submodels and reducers` | `src/graph/state.py` full rewrite; `tests/graph/test_state_reducers.py`                                                                                     |
+| 2   | `refactor(nodes): migrate schema pipeline nodes to pydantic state`                  | All `schema_nodes/`, `graph.py` routing, `graph/__init__.py`                                                                                                |
+| 3   | `refactor(nodes): migrate query pipeline nodes to pydantic state`                   | All `query_nodes/`, `memory_nodes.py`, `memory/session.py`                                                                                                  |
+| 4   | `refactor(memory): replace previous_* fields with MemoryState and ConversationTurn` | `memory/session.py` snapshot logic, `memory_nodes.py`, `tests/memory/test_session.py`                                                                       |
+| 5   | `feat(query-agent): inject conversation history into plan/sql/critic prompts`       | `agents/query_agent.py`, `agents/prompts/query.py`, `query_plan.py`, `query_generate_sql.py`, `query_critic.py`, `tests/agents/test_query_agent_history.py` |
+| 6   | `feat(ui): migrate app and formatters to pydantic state`                            | `ui/app.py`, `ui/formatters.py`, `main.py`                                                                                                                  |
+| 7   | `test: add two-turn integration test for iterative refinement`                      | `tests/graph/test_query_pipeline.py` updated                                                                                                                |
 
 Each commit leaves the test suite green and the application runnable.
 
