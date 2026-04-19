@@ -78,11 +78,13 @@ def _print_query_answer(payload: dict[str, Any]) -> None:
         print(f"\n{lim}\n")
 
 
-def _print_outcome(state: dict[str, Any]) -> None:
-    err = state.get("last_error")
+def _print_outcome(state: Any) -> None:
+    err = state.last_error if hasattr(state, "last_error") else state.get("last_error")
     if err:
         print(f"\nError: {err}\n", file=sys.stderr)
-    lr = state.get("last_result")
+    lr = (
+        state.last_result if hasattr(state, "last_result") else state.get("last_result")
+    )
     if not lr:
         if not err:
             print("\n(no last_result in state)\n")
@@ -192,7 +194,12 @@ async def _interactive_chat(
     if initial_question:
         state = await one_turn(initial_question)
         _print_outcome(state)
-        if state.get("last_error"):
+        last_err = (
+            state.last_error
+            if hasattr(state, "last_error")
+            else state.get("last_error")
+        )
+        if last_err:
             return 1
         if not sys.stdin.isatty():
             return 0

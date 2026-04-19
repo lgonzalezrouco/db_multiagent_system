@@ -73,7 +73,7 @@ async def _run_until_interrupt_or_done(
     while True:
         state, interrupts = unwrap_graph_v2(out)
         if not interrupts:
-            _close_run(run_tree, outputs={"steps": state.get("steps", [])})
+            _close_run(run_tree, outputs={"steps": state.steps})
             return state, None
         intr = interrupts[0]
         payload = getattr(intr, "value", intr)
@@ -108,7 +108,7 @@ async def _consume_resume(
         state, interrupts = unwrap_graph_v2(out)
         if not interrupts:
             st.session_state.pop("_schema_hitl", None)
-            _close_run(run_tree, outputs={"steps": state.get("steps", [])})
+            _close_run(run_tree, outputs={"steps": state.steps})
             return state
         intr = interrupts[0]
         payload = getattr(intr, "value", intr)
