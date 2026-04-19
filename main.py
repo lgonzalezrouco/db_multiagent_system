@@ -11,6 +11,7 @@ from typing import Any
 
 import psycopg
 from langgraph.types import Command
+from langsmith.run_helpers import trace as ls_trace
 from pydantic import ValidationError
 
 from config import PostgresSettings
@@ -135,21 +136,36 @@ async def _run_turn_with_hitl(
     input_arg: dict[str, Any] | Command,
     config: dict[str, Any],
 ) -> dict[str, Any]:
-    out = await app.ainvoke(input_arg, config=config, version="v2")
-    while True:
-        state, interrupts = unwrap_graph_v2(out)
-        if not interrupts:
+    user_input = input_arg.get("user_input", "") if isinstance(input_arg, dict) else ""
+    async with ls_trace(
+        "agent_turn",
+        run_type="chain",
+        inputs={"user_input": user_input},
+        tags=config.get("tags") or [],
+        metadata=config.get("metadata") or {},
+    ):
+        out = await app.ainvoke(input_arg, config=config, version="v2")
+        while True:
+            state, interrupts = unwrap_graph_v2(out)
+            if not interrupts:
+                return state
+            intr = interrupts[0]
+            payload = getattr(intr, "value", intr)
+            if not isinstance(payload, dict):
+                raise SystemExit(
+                    f"unexpected interrupt payload: {type(payload).__name__}"
+                )
+            if payload.get("kind") == "schema_review":
+                resume = await _prompt_schema_resume(payload)
+                out = await app.ainvoke(
+                    Command(resume=resume), config=config, version="v2"
+                )
+                continue
+            print(
+                f"\n(unhandled interrupt kind {payload!r}; stopping.)\n",
+                file=sys.stderr,
+            )
             return state
-        intr = interrupts[0]
-        payload = getattr(intr, "value", intr)
-        if not isinstance(payload, dict):
-            raise SystemExit(f"unexpected interrupt payload: {type(payload).__name__}")
-        if payload.get("kind") == "schema_review":
-            resume = await _prompt_schema_resume(payload)
-            out = await app.ainvoke(Command(resume=resume), config=config, version="v2")
-            continue
-        print(f"\n(unhandled interrupt kind {payload!r}; stopping.)\n", file=sys.stderr)
-        return state
 
 
 async def _interactive_chat(

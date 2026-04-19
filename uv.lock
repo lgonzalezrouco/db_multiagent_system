@@ -441,7 +441,7 @@ dev = [
 requires-dist = [
     { name = "langchain-litellm", specifier = ">=0.6.4" },
     { name = "langchain-mcp-adapters", specifier = ">=0.2.2" },
-    { name = "langgraph", specifier = ">=1.1.7" },
+    { name = "langgraph", specifier = ">=1.1.8" },
     { name = "langsmith", specifier = ">=0.7.32" },
     { name = "mcp", specifier = ">=1.27.0" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.3" },
@@ -967,7 +967,7 @@ wheels = [
 
 [[package]]
 name = "langgraph"
-version = "1.1.7"
+version = "1.1.8"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "langchain-core" },
@@ -977,9 +977,9 @@ dependencies = [
     { name = "pydantic" },
     { name = "xxhash" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ce/ab/3398c9e564a5037a3b657b87af5ffa48af7704143e225d4c2a5b0cc3617e/langgraph-1.1.7.tar.gz", hash = "sha256:92e0d26c2b05972fce8a9a604dcf9b4e2348300e953e24bd6c3188e91da6ceca", size = 559971, upload-time = "2026-04-17T15:24:46.994Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c3/02/196eff4f673fd461f8780930c3bfa7f27d6533a48e4f1104d544e843b093/langgraph-1.1.8.tar.gz", hash = "sha256:a97b8248129f2e007b81eef8277009ad1e1280b75fa2175889ab5aff5dcc4578", size = 560389, upload-time = "2026-04-17T19:45:50.301Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/a8/0a/d742418bad268b122fbc9536e07f039f930d59f9c65acad07f2e25275ef9/langgraph-1.1.7-py3-none-any.whl", hash = "sha256:37fe5357508080fe0cda4dcf49735d32439eb211ef48ad09a097ee489d78d43b", size = 173768, upload-time = "2026-04-17T15:24:45.287Z" },
+    { url = "https://files.pythonhosted.org/packages/22/38/c72e795f6f8fd05a8e7c3be32c04ea8534294decc6785f3b04e0ce932e8a/langgraph-1.1.8-py3-none-any.whl", hash = "sha256:3278c7e335da25eac3327bb474c502d4cab94ae6dcc685fbf93be2bbf7664cd5", size = 173678, upload-time = "2026-04-17T19:45:48.991Z" },
 ]
 
 [[package]]
