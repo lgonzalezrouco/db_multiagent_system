@@ -150,7 +150,6 @@ See [`.env.example`](.env.example) for all defaults.
 │   │   ├── prompts/             # Prompt strings (query, schema)
 │   │   └── schemas/             # Pydantic output models
 │   ├── config/                  # pydantic-settings: postgres, app memory, MCP, LLM
-│   ├── db_multiagent_system/    # Demos / bootstrap / schema_export helpers
 │   ├── graph/
 │   │   ├── graph.py             # StateGraph wiring, MemorySaver, graph_run_config()
 │   │   ├── state.py             # GraphState
