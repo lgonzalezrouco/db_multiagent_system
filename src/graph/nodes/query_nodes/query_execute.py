@@ -13,14 +13,11 @@ logger = logging.getLogger(__name__)
 
 
 async def query_execute(state: GraphState) -> dict[str, Any]:
-    steps = list(state.get("steps", []))
-    steps.append("query_execute")
-
-    sql = state.get("generated_sql") or ""
+    sql = state.query.generated_sql or ""
 
     out: dict[str, Any] = {
-        "steps": steps,
-        "query_execution_result": None,
+        "steps": ["query_execute"],
+        "query": {"execution_result": None},
         "last_error": None,
     }
 
@@ -36,7 +33,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
 
         raw = await exec_tool.ainvoke({"sql": sql})
         payload = mcp_helpers.tool_result_to_dict(raw)
-        out["query_execution_result"] = payload
+        out["query"] = {"execution_result": payload}
 
         if isinstance(payload, dict) and payload.get("success"):
             pass

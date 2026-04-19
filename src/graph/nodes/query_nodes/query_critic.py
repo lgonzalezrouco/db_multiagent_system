@@ -70,73 +70,73 @@ def _semantic_feedback(payload: dict[str, Any] | None) -> str:
 
 
 def route_after_critic(state: GraphState) -> Literal["execute", "retry", "cap"]:
-    if state.get("critic_status") == "accept":
+    if state.query.critic_status == "accept":
         return "execute"
     max_r = query_max_refinements()
-    if int(state.get("refinement_count") or 0) < max_r:
+    if int(state.query.refinement_count or 0) < max_r:
         return "retry"
     return "cap"
 
 
 async def query_critic(state: GraphState) -> dict[str, Any]:
-    steps = list(state.get("steps", []))
-    steps.append("query_critic")
-
-    sql = state.get("generated_sql")
-    sql_text = sql if isinstance(sql, str) else None
+    sql_text = state.query.generated_sql
+    sql_text = sql_text if isinstance(sql_text, str) else None
 
     ok, feedback = validate_sql_for_execution(sql_text)
     if not ok:
         logger.warning("SQL validation failed (critic reject): %s", feedback)
-        rc = int(state.get("refinement_count") or 0) + 1
+        rc = int(state.query.refinement_count or 0) + 1
         return {
-            "steps": steps,
-            "critic_status": "reject",
-            "critic_feedback": feedback,
-            "refinement_count": rc,
+            "steps": ["query_critic"],
+            "query": {
+                "critic_status": "reject",
+                "critic_feedback": feedback,
+                "refinement_count": rc,
+            },
         }
 
-    raw_prefs = state.get("preferences")
-    prefs = raw_prefs if isinstance(raw_prefs, dict) else None
-    query_plan = (
-        state.get("query_plan") if isinstance(state.get("query_plan"), dict) else None
-    )
+    prefs = state.memory.preferences
+    query_plan = state.query.plan if isinstance(state.query.plan, dict) else None
     schema_docs_context = (
-        state.get("schema_docs_context")
-        if isinstance(state.get("schema_docs_context"), dict)
-        else None
+        state.query.docs_context if isinstance(state.query.docs_context, dict) else None
     )
+    history = state.memory.conversation_history or []
+    history_dicts = [t.model_dump(mode="json") for t in history] if history else None
 
     try:
         critique = await build_query_critique(
-            state.get("user_input", "") or "",
+            state.user_input or "",
             sql_text or "",
             query_plan=query_plan,
             schema_docs_context=schema_docs_context,
-            preferences=prefs,
+            preferences=prefs if isinstance(prefs, dict) else None,
+            conversation_history=history_dicts,
         )
     except Exception as exc:
         logger.exception("Semantic SQL critic LLM call failed")
         return {
-            "steps": steps,
-            "critic_status": "accept",
-            "critic_feedback": f"Semantic critic unavailable: {type(exc).__name__}",
+            "steps": ["query_critic"],
+            "query": {
+                "critic_status": "accept",
+                "critic_feedback": f"Semantic critic unavailable: {type(exc).__name__}",
+            },
         }
 
     verdict = _normalize_critic_verdict(critique.get("verdict"))
     if verdict == "accept":
         return {
-            "steps": steps,
-            "critic_status": "accept",
-            "critic_feedback": None,
+            "steps": ["query_critic"],
+            "query": {"critic_status": "accept", "critic_feedback": None},
         }
 
     semantic_feedback = _semantic_feedback(critique)
     logger.warning("Semantic SQL critic rejected generated SQL: %s", semantic_feedback)
-    rc = int(state.get("refinement_count") or 0) + 1
+    rc = int(state.query.refinement_count or 0) + 1
     return {
-        "steps": steps,
-        "critic_status": "reject",
-        "critic_feedback": semantic_feedback,
-        "refinement_count": rc,
+        "steps": ["query_critic"],
+        "query": {
+            "critic_status": "reject",
+            "critic_feedback": semantic_feedback,
+            "refinement_count": rc,
+        },
     }

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from graph.state import GraphState
 from ui.formatters import (
     default_schema_edit_json,
     format_query_answer_markdown,
@@ -49,7 +50,7 @@ def test_format_query_answer_markdown_truncates_at_max_rows() -> None:
 def test_format_turn_state_displays_error_when_present() -> None:
     """Turn state shows error message when last_error is set."""
     # Given: state with error
-    state = {"last_error": "MCP down", "last_result": None}
+    state = GraphState(last_error="MCP down", last_result=None)
 
     # When: formatting turn state
     text = format_turn_state(state)
@@ -61,15 +62,15 @@ def test_format_turn_state_displays_error_when_present() -> None:
 def test_format_turn_state_displays_query_answer() -> None:
     """Turn state formats query answer result."""
     # Given: state with query answer
-    state = {
-        "last_error": None,
-        "last_result": {
+    state = GraphState(
+        last_error=None,
+        last_result={
             "kind": "query_answer",
             "sql": "SELECT 1",
             "columns": [],
             "rows": [],
         },
-    }
+    )
 
     # When: formatting turn state
     text = format_turn_state(state)
@@ -108,14 +109,14 @@ def test_format_schema_persist_markdown_success_singular_table() -> None:
 def test_format_turn_state_displays_schema_persist() -> None:
     """Turn state formats schema persist result without raw JSON."""
     # Given: state with schema persist result
-    state = {
-        "last_error": None,
-        "last_result": {
+    state = GraphState(
+        last_error=None,
+        last_result={
             "kind": "schema_persist",
             "success": True,
             "table_count": 3,
         },
-    }
+    )
 
     # When: formatting turn state
     text = format_turn_state(state)

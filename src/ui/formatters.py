@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from graph.state import GraphState
 
 
 def format_query_answer_markdown(payload: dict[str, Any], *, max_rows: int = 50) -> str:
@@ -66,10 +69,10 @@ def format_schema_persist_markdown(payload: dict[str, Any]) -> str:
     )
 
 
-def format_turn_state(state: dict[str, Any]) -> str:
+def format_turn_state(state: GraphState) -> str:
     """Format graph ``last_error`` / ``last_result`` for chat display."""
-    err = state.get("last_error")
-    lr = state.get("last_result")
+    err = state.last_error
+    lr = state.last_result
     parts: list[str] = []
     if err:
         parts.append(f"**Error:** {err}")

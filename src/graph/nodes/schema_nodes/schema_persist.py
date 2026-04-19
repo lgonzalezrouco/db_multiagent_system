@@ -61,15 +61,15 @@ def _normalize_approved(approved: Any) -> tuple[list[dict[str, Any]], str | None
 
 def schema_persist(state: GraphState) -> dict[str, Any]:
     """Persist approved schema docs to app_memory via SchemaDocsStore."""
-    steps = list(state.get("steps", []))
-    steps.append("schema_persist")
+    out: dict[str, Any] = {
+        "steps": ["schema_persist"],
+        "schema_pipeline": {"persist_error": None},
+    }
 
-    out: dict[str, Any] = {"steps": steps, "persist_error": None}
-
-    approved = state.get("schema_approved")
+    approved = state.schema_pipeline.approved
     tables, err = _normalize_approved(approved)
     if err:
-        out["persist_error"] = err
+        out["schema_pipeline"] = {"persist_error": err}
         out["last_error"] = err
         out["last_result"] = None
         logger.error("schema_persist validation failed: %s", err)
@@ -82,7 +82,7 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
         "source": "schema_agent_hitl",
         "tables": tables,
     }
-    meta = state.get("schema_metadata")
+    meta = state.schema_pipeline.metadata
     fingerprint: str | None = None
     if isinstance(meta, dict):
         fingerprint = hashlib.sha256(
@@ -92,7 +92,7 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
     try:
         store = SchemaDocsStore(AppMemorySettings())
         store.upsert_approved(payload_doc, metadata_fingerprint=fingerprint)
-        out["schema_ready"] = True
+        out["schema_pipeline"] = {"persist_error": None, "ready": True}
         out["last_result"] = {
             "kind": "schema_persist",
             "success": True,
@@ -101,7 +101,7 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
         out["last_error"] = None
     except psycopg.OperationalError as exc:
         msg = f"could not persist schema docs: {type(exc).__name__}"
-        out["persist_error"] = msg
+        out["schema_pipeline"] = {"persist_error": msg}
         out["last_error"] = msg
         out["last_result"] = None
         logger.error("could not persist schema docs: %s", exc)

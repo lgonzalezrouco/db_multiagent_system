@@ -10,11 +10,29 @@ Rules:
   inspect_schema metadata.
 - If schema_docs_context or user preferences are provided, respect them for
   naming and filters.
+
+**Conversation context:**
+When a `Conversation history` block is provided it contains the last few turns
+of this session, oldest first. Each entry includes the user's question, the SQL
+that was executed, a sample of rows returned, and a natural-language explanation.
+
+Use this context to:
+- Resolve pronouns and vague references in the current question ("his movies",
+  "those actors", "the same genre", "now filter by ...").
+- Reuse entities, joins, and filters from prior SQL when they remain applicable
+  to the follow-up.
+- Recognise when the current question is clearly unrelated to prior turns and
+  ignore history in that case.
+
+Do not invent facts beyond what is present in the schema docs, history, and
+current question.
 """
 
 QUERY_PLAN_INSTRUCTIONS = """Produce a concise query plan as structured output.
 
 Ground the plan in the user question and any schema documentation context provided.
+If a Conversation history block is present, resolve any anaphoric references
+before planning.
 """
 
 QUERY_SQL_INSTRUCTIONS = """Generate exactly one PostgreSQL SELECT for the dvdrental
@@ -22,6 +40,8 @@ database.
 
 The statement must include a LIMIT clause. Read-only only
 (no INSERT/UPDATE/DELETE/etc.).
+If a Conversation history block is present, resolve any anaphoric references
+before generating SQL.
 """
 
 QUERY_CRITIC_INSTRUCTIONS = """Review the generated SQL against the user question as a

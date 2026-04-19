@@ -39,19 +39,16 @@ def _fallback_explanation(
 
 
 async def query_explain(state: GraphState) -> dict[str, Any]:
-    steps = list(state.get("steps", []))
-    steps.append("query_explain")
-
-    err_early = state.get("last_error")
-    payload = state.get("query_execution_result")
-    sql = state.get("generated_sql") or ""
+    err_early = state.last_error
+    payload = state.query.execution_result
+    sql = state.query.generated_sql or ""
 
     if err_early:
         return {
-            "steps": steps,
+            "steps": ["query_explain"],
             "last_error": err_early,
             "last_result": None,
-            "query_explanation": None,
+            "query": {"explanation": None},
         }
 
     if not isinstance(payload, dict) or not payload.get("success"):
@@ -62,32 +59,31 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
                 msg = str(err["message"])
         logger.warning("%s", msg)
         return {
-            "steps": steps,
+            "steps": ["query_explain"],
             "last_error": msg,
             "last_result": None,
-            "query_explanation": None,
+            "query": {"explanation": None},
         }
 
     columns = [str(c) for c in (payload.get("columns") or [])]
     rows_raw = payload.get("rows") or []
     rows_out = _rows_to_dicts(columns, rows_raw)
 
-    warn = state.get("schema_docs_warning")
+    warn = state.query.docs_warning
     limitations = _default_limitations(warn)
-    expl = _fallback_explanation(state.get("user_input", "") or "", payload, rows_out)
+    expl = _fallback_explanation(state.user_input or "", payload, rows_out)
 
-    raw_prefs = state.get("preferences")
-    prefs = raw_prefs if isinstance(raw_prefs, dict) else None
-    qp = state.get("query_plan") if isinstance(state.get("query_plan"), dict) else None
+    prefs = state.memory.preferences
+    qp = state.query.plan if isinstance(state.query.plan, dict) else None
 
     try:
         llm_out = await build_query_explanation(
-            state.get("user_input", "") or "",
+            state.user_input or "",
             sql,
             query_execution_result=payload,
             schema_docs_warning=str(warn) if warn else None,
             query_plan=qp,
-            preferences=prefs,
+            preferences=prefs if isinstance(prefs, dict) else None,
         )
         if isinstance(llm_out, dict):
             llm_expl = llm_out.get("explanation")
@@ -115,8 +111,8 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
     }
 
     return {
-        "steps": steps,
+        "steps": ["query_explain"],
         "last_result": last_result,
         "last_error": None,
-        "query_explanation": expl,
+        "query": {"explanation": expl},
     }

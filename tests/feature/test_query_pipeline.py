@@ -9,6 +9,7 @@ import pytest
 
 from agents.schemas.query_outputs import QueryCritiqueOutput, QueryExplanationOutput
 from graph import get_compiled_graph, graph_run_config
+from graph.invoke_v2 import unwrap_graph_v2
 from graph.nodes.query_nodes import validate_sql_for_execution
 from tests.schema_presence_stubs import ReadySchemaPresence
 
@@ -172,19 +173,20 @@ async def test_graph_ainvoke_completes_query_pipeline_with_mocked_mcp(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: query pipeline completes successfully
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("gate_decision") == "query_path"
-    assert result.get("schema_ready") is True
-    lr = result.get("last_result")
+    state = unwrap_graph_v2(out)[0]
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.gate_decision == "query_path"
+    assert state.schema_pipeline.ready is True
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
-    assert result.get("last_error") is None
+    assert state.last_error is None
 
 
 @pytest.mark.asyncio
@@ -218,19 +220,20 @@ async def test_graph_works_without_postgres_env_vars(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-2", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: query pipeline completes successfully
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("gate_decision") == "query_path"
-    assert result.get("schema_ready") is True
-    lr = result.get("last_result")
+    state = unwrap_graph_v2(out)[0]
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.gate_decision == "query_path"
+    assert state.schema_pipeline.ready is True
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
-    assert result.get("last_error") is None
+    assert state.last_error is None
 
 
 @pytest.mark.asyncio
@@ -253,7 +256,7 @@ async def test_pipeline_clears_last_result_on_tool_error(
     # When: invoking with pre-existing last_result
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-error-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {
             "user_input": "ping",
             "steps": [],
@@ -264,9 +267,10 @@ async def test_pipeline_clears_last_result_on_tool_error(
     )
 
     # Then: last_result is cleared and error is set
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("last_error") is not None
-    assert result.get("last_result") is None
+    state = unwrap_graph_v2(out)[0]
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.last_error is not None
+    assert state.last_result is None
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +327,14 @@ async def test_critic_retry_then_success(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-retry-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "count actors", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: retry occurred and succeeded
-    assert result.get("steps") == [
+    state = unwrap_graph_v2(out)[0]
+    assert state.steps == [
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
@@ -342,8 +347,8 @@ async def test_critic_retry_then_success(
         "query_explain",
         "memory_update_session",
     ]
-    assert int(result.get("refinement_count") or 0) == 1
-    lr = result.get("last_result")
+    assert state.query.refinement_count == 1
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
     assert calls == [0, 1]
@@ -389,13 +394,14 @@ async def test_refinement_cap_prevents_infinite_retry(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-cap-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "never lands", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: cap is reached and error is reported
-    assert result.get("steps") == [
+    state = unwrap_graph_v2(out)[0]
+    assert state.steps == [
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
@@ -409,10 +415,8 @@ async def test_refinement_cap_prevents_infinite_retry(
         "query_refine_cap",
         "memory_update_session",
     ]
-    assert result.get("last_error") == (
-        "Critic rejected SQL after max refinement attempts."
-    )
-    assert result.get("last_result") is None
+    assert state.last_error == "Critic rejected SQL after max refinement attempts."
+    assert state.last_result is None
 
 
 @pytest.mark.asyncio
@@ -518,13 +522,14 @@ async def test_semantic_critic_rejection_triggers_retry(
         thread_id="query-semantic-retry-1",
         run_kind="pytest",
     )
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "count rentals", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: retry occurred with correct SQL
-    assert result.get("steps") == [
+    state = unwrap_graph_v2(out)[0]
+    assert state.steps == [
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
@@ -539,11 +544,11 @@ async def test_semantic_critic_rejection_triggers_retry(
     ]
     assert sql_calls == [0, 1]
     assert critique_calls == [0, 1]
-    assert int(result.get("refinement_count") or 0) == 1
-    lr = result.get("last_result")
+    assert state.query.refinement_count == 1
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("sql") == "SELECT COUNT(*)::bigint AS n FROM public.rental LIMIT 10"
-    assert result.get("last_error") is None
+    assert state.last_error is None
 
 
 # ---------------------------------------------------------------------------
@@ -600,15 +605,16 @@ async def test_missing_schema_docs_sets_warning(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-docs-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "smoke", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: warning is set and included in limitations
-    warn = result.get("schema_docs_warning")
+    state = unwrap_graph_v2(out)[0]
+    warn = state.query.docs_warning
     assert isinstance(warn, str) and warn
-    lr = result.get("last_result")
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
     lim = lr.get("limitations")
@@ -653,14 +659,15 @@ async def test_mcp_error_message_propagates_to_last_error(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "broken query path", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: error message is in last_error
-    assert result.get("last_error") == expected_msg
-    assert result.get("last_result") is None
+    state = unwrap_graph_v2(out)[0]
+    assert state.last_error == expected_msg
+    assert state.last_result is None
 
 
 # ---------------------------------------------------------------------------
@@ -715,14 +722,15 @@ async def test_explain_falls_back_when_llm_fails(
         thread_id="query-explain-fallback-1",
         run_kind="pytest",
     )
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "show actor count", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: fallback explanation is used
-    assert result.get("last_error") is None
-    lr = result.get("last_result")
+    state = unwrap_graph_v2(out)[0]
+    assert state.last_error is None
+    lr = state.last_result
     assert isinstance(lr, dict)
     explanation = lr.get("explanation")
     limitations = lr.get("limitations")
@@ -730,3 +738,154 @@ async def test_explain_falls_back_when_llm_fails(
     assert "show actor count" in explanation
     assert isinstance(limitations, str)
     assert "Read-only SELECT with LIMIT" in limitations
+
+
+@pytest.mark.asyncio
+async def test_two_turns_accumulate_conversation_history(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """conversation_history grows turn-by-turn and survives the checkpointer."""
+
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": True,
+                "rows_returned": 2,
+                "rows": [{"actor_id": 1, "first_name": "Nick"}],
+                "columns": ["actor_id", "first_name"],
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(
+        thread_id="two-turn-history-1", run_kind="pytest"
+    )
+
+    q1 = "Which actors worked with Nick Wahlberg?"
+    q2 = "Now show me his movies."
+
+    out1 = await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
+    state1 = unwrap_graph_v2(out1)[0]
+    assert state1.last_error is None
+    assert len(state1.memory.conversation_history) == 1
+    assert state1.memory.conversation_history[0].user_input == q1
+
+    out2 = await app.ainvoke({"user_input": q2, "steps": [], **state_seed}, config=cfg)
+    state2 = unwrap_graph_v2(out2)[0]
+    assert state2.last_error is None
+    assert len(state2.memory.conversation_history) == 2
+    assert state2.memory.conversation_history[1].user_input == q2
+
+
+@pytest.mark.asyncio
+async def test_second_turn_receives_history_in_llm_prompt(
+    postgres_env: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second turn's plan call has the first turn's context in the human message."""
+    from langchain_core.messages import HumanMessage
+
+    from agents.schemas.query_outputs import (
+        QueryCritiqueOutput,
+        QueryPlanOutput,
+        SqlGenerationOutput,
+    )
+
+    plan_messages_by_turn: list[list[Any]] = []
+
+    class _CapturingRunnable:
+        def __init__(self, kind: str) -> None:
+            self.kind = kind
+
+        async def ainvoke(self, messages: list[Any]) -> Any:
+            if self.kind == "plan":
+                plan_messages_by_turn.append(messages)
+                return QueryPlanOutput(
+                    intent="explore",
+                    summary="stub",
+                    relevant_tables=["public.film"],
+                    notes=[],
+                    assumptions=[],
+                )
+            if self.kind == "sql":
+                return SqlGenerationOutput(
+                    sql="SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10",
+                    rationale="stub",
+                )
+            if self.kind == "critique":
+                return QueryCritiqueOutput(
+                    verdict="accept", feedback="ok", risks=[], assumptions=[]
+                )
+            raise NotImplementedError(self.kind)
+
+    class _CapturingLLM:
+        def with_structured_output(self, schema: type[Any]) -> _CapturingRunnable:
+            mapping = {
+                "QueryPlanOutput": "plan",
+                "SqlGenerationOutput": "sql",
+                "QueryCritiqueOutput": "critique",
+            }
+            name = getattr(schema, "__name__", "")
+            if name not in mapping:
+                raise NotImplementedError(name)
+            return _CapturingRunnable(mapping[name])
+
+    monkeypatch.setattr(
+        "agents.query_agent.create_chat_llm", lambda *a, **kw: _CapturingLLM()
+    )
+
+    class _FakeTool:
+        name = "execute_readonly_sql"
+
+        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "success": True,
+                "rows_returned": 1,
+                "rows": [{"n": 5}],
+                "columns": ["n"],
+            }
+
+    class _FakeClient:
+        async def get_tools(self) -> list[_FakeTool]:
+            return [_FakeTool()]
+
+    async def _fake_client(_settings: Any) -> _FakeClient:
+        return _FakeClient()
+
+    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
+
+    app = get_compiled_graph(presence=ReadySchemaPresence())
+    cfg, state_seed = graph_run_config(
+        thread_id="two-turn-history-2", run_kind="pytest"
+    )
+
+    q1 = "Which actors worked with Nick Wahlberg?"
+
+    await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
+    assert len(plan_messages_by_turn) == 1
+    turn1_human = next(
+        (m.content for m in plan_messages_by_turn[0] if isinstance(m, HumanMessage)), ""
+    )
+    assert "Conversation history (JSON" not in turn1_human
+
+    await app.ainvoke(
+        {"user_input": "Now show me his movies.", "steps": [], **state_seed},
+        config=cfg,
+    )
+    assert len(plan_messages_by_turn) == 2
+    turn2_human = next(
+        (m.content for m in plan_messages_by_turn[1] if isinstance(m, HumanMessage)), ""
+    )
+    assert "Conversation history (JSON" in turn2_human
+    assert "Nick Wahlberg" in turn2_human
