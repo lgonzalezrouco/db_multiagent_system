@@ -11,21 +11,18 @@ logger = logging.getLogger(__name__)
 
 
 def schema_hitl(state: GraphState) -> dict[str, Any]:
-    """Dynamic HITL: ``interrupt()`` with draft; on resume, set ``schema_approved``.
+    """Dynamic HITL: ``interrupt()`` with draft; on resume, set ``schema.approved``.
 
     Metadata and draft are produced by prior nodes and already in checkpointed
     state, so this node stays safe to re-enter from the top.
     """
-    steps = list(state.get("steps", []))
-    draft = state.get("schema_draft")
+    draft = state.schema.draft
     hitl_payload: dict[str, Any] = {
         "kind": "schema_review",
         "draft": draft,
     }
     approved = interrupt(hitl_payload)
-    steps.append("schema_hitl")
     return {
-        "schema_approved": approved,
-        "hitl_prompt": hitl_payload,
-        "steps": steps,
+        "schema": {"approved": approved, "hitl_prompt": hitl_payload},
+        "steps": ["schema_hitl"],
     }

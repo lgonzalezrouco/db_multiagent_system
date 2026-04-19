@@ -15,6 +15,7 @@ from graph import (
     graph_run_config,
 )
 from graph.invoke_v2 import unwrap_graph_v2
+from graph.state import GraphState
 from memory.preferences import default_preferences
 from tests.schema_presence_stubs import NotReadySchemaPresence, ReadySchemaPresence
 
@@ -59,10 +60,19 @@ def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MCP_PORT", "8000")
 
 
-def _state_dict(out: Any) -> dict[str, Any]:
-    if isinstance(out, dict):
+def _unwrap_state(out: Any) -> GraphState:
+    """Extract the GraphState from a graph output (v1 or v2)."""
+    if isinstance(out, GraphState):
         return out
-    return dict(out.value)
+    if isinstance(out, dict):
+        return GraphState(**out)
+    # v2 GraphOutput
+    value = getattr(out, "value", None)
+    if isinstance(value, GraphState):
+        return value
+    if isinstance(value, dict):
+        return GraphState(**value)
+    raise TypeError(f"unexpected output: {type(out).__name__}")
 
 
 class _FakeSchemaDocsStore:
@@ -119,16 +129,17 @@ async def test_query_path_runs_when_schema_ready(
     # When: invoking the graph with ready schema
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="gate-query-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "count something", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: query pipeline executes
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("gate_decision") == "query_path"
-    assert result.get("schema_ready") is True
-    lr = result.get("last_result")
+    state = _unwrap_state(out)
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.gate_decision == "query_path"
+    assert state.schema.ready is True
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
 
@@ -246,8 +257,8 @@ async def test_schema_path_interrupt_resume_persist(
 
     # Then: interrupt before persist
     assert out1.interrupts, "expected interrupt before persist"
-    st1 = _state_dict(out1)
-    assert st1.get("steps") == [
+    st1 = _unwrap_state(out1)
+    assert st1.steps == [
         "gate:schema_path",
         "schema_inspect",
         "schema_draft",
@@ -272,22 +283,22 @@ async def test_schema_path_interrupt_resume_persist(
 
     # Then: completes without further interrupts
     assert not out2.interrupts
-    final = _state_dict(out2)
-    assert final.get("steps") == [
+    final = _unwrap_state(out2)
+    assert final.steps == [
         "gate:schema_path",
         "schema_inspect",
         "schema_draft",
         "schema_hitl",
         "schema_persist",
     ]
-    assert final.get("gate_decision") == "schema_path"
-    assert final.get("schema_ready") is True
-    lr = final.get("last_result")
+    assert final.gate_decision == "schema_path"
+    assert final.schema.ready is True
+    lr = final.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "schema_persist"
     assert lr.get("success") is True
-    assert final.get("last_error") is None
-    assert final.get("persist_error") is None
+    assert final.last_error is None
+    assert final.schema.persist_error is None
 
     # Verify store was called correctly
     assert len(_FakeSchemaDocsStore.captured) == 1
@@ -468,7 +479,7 @@ async def test_schema_persist_pivots_to_query_when_user_input_present(
     # Then: interrupted before persist
     state1, interrupts1 = unwrap_graph_v2(out1)
     assert interrupts1, "expected HITL interrupt before schema_persist"
-    assert state1.get("steps") == [
+    assert state1.steps == [
         "gate:schema_path",
         "schema_inspect",
         "schema_draft",
@@ -493,11 +504,11 @@ async def test_schema_persist_pivots_to_query_when_user_input_present(
     state2, interrupts2 = unwrap_graph_v2(out2)
     assert not interrupts2, "expected no further interrupts after HITL resume"
 
-    assert state2.get("steps") == _PIVOT_STEPS
-    assert state2.get("gate_decision") == "query_path"
-    assert state2.get("schema_ready") is True
-    assert state2.get("persist_error") is None
+    assert state2.steps == _PIVOT_STEPS
+    assert state2.gate_decision == "query_path"
+    assert state2.schema.ready is True
+    assert state2.schema.persist_error is None
 
-    lr = state2.get("last_result")
+    lr = state2.last_result
     assert isinstance(lr, dict), f"last_result should be a dict, got: {lr!r}"
     assert lr.get("kind") == "query_answer"

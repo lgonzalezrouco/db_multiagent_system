@@ -33,19 +33,18 @@ def inspect_schema_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
 
 
 async def schema_inspect(state: GraphState) -> dict[str, Any]:
-    """Call MCP ``inspect_schema``; store payload in ``schema_metadata``."""
-    steps = list(state.get("steps", []))
+    """Call MCP ``inspect_schema``; store payload in ``schema.metadata``."""
     gate_decision = "schema_path"
-    steps.append(f"gate:{gate_decision}")
-    steps.append("schema_inspect")
 
     out: dict[str, Any] = {
-        "steps": steps,
+        "steps": [f"gate:{gate_decision}", "schema_inspect"],
         "last_error": None,
         "last_result": None,
         "gate_decision": gate_decision,
-        "schema_ready": False,
-        "persist_error": None,
+        "schema": {
+            "ready": False,
+            "persist_error": None,
+        },
     }
 
     try:
@@ -62,7 +61,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
         raw = await inspect_tool.ainvoke({"schema_name": "public", "table_name": None})
         payload = mcp_helpers.tool_result_to_dict(raw)
         if payload and payload.get("success"):
-            out["schema_metadata"] = payload
+            out["schema"] = {"ready": False, "persist_error": None, "metadata": payload}
             out["last_result"] = inspect_schema_summary(payload)
         else:
             err = (payload or {}).get("error") if isinstance(payload, dict) else None
@@ -75,7 +74,11 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
                 else "could not parse MCP tool result"
             )
             out["last_result"] = inspect_schema_summary(payload)
-            out["schema_metadata"] = payload if isinstance(payload, dict) else None
+            out["schema"] = {
+                "ready": False,
+                "persist_error": None,
+                "metadata": payload if isinstance(payload, dict) else None,
+            }
             logger.warning("inspect_schema failed: %s", out["last_error"])
     except ValidationError as exc:
         out["last_error"] = mcp_helpers.format_settings_validation_error(exc)
