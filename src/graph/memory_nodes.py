@@ -23,16 +23,6 @@ async def memory_load_user(state: GraphState) -> dict[str, Any]:
     settings = AppMemorySettings()
     user_id = state.get("user_id") or settings.default_user_id
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "memory_load_user",
-            "graph_phase": "enter",
-            "user_id": user_id,
-            "steps_count": len(steps),
-        },
-    )
-
     out: dict[str, Any] = {
         "steps": steps,
         "user_id": user_id,
@@ -46,18 +36,11 @@ async def memory_load_user(state: GraphState) -> dict[str, Any]:
     try:
         pref_store = UserPreferencesStore(settings)
         out["preferences"] = pref_store.get(user_id)
-    except psycopg.OperationalError as exc:
-        warn = f"app_memory unreachable: {type(exc).__name__}"
+    except psycopg.OperationalError:
+        warn = "app_memory unreachable while loading preferences"
         out["memory_warning"] = warn
         out["preferences"] = default_preferences()
-        logger.warning(
-            "memory_load_user_db_error",
-            extra={
-                "graph_node": "memory_load_user",
-                "phase": "preferences",
-                "warning": warn,
-            },
-        )
+        logger.warning(warn)
 
     try:
         docs_store = SchemaDocsStore(settings)
@@ -66,32 +49,13 @@ async def memory_load_user(state: GraphState) -> dict[str, Any]:
             out["schema_docs_context"] = payload
         else:
             out["schema_docs_warning"] = "No approved schema docs in app_memory"
-    except psycopg.OperationalError as exc:
-        warn = f"app_memory unreachable: {type(exc).__name__}"
+    except psycopg.OperationalError:
+        warn = "app_memory unreachable while loading schema docs"
         out["schema_docs_warning"] = warn
         if out.get("memory_warning") is None:
             out["memory_warning"] = warn
-        logger.warning(
-            "memory_load_user_db_error",
-            extra={
-                "graph_node": "memory_load_user",
-                "phase": "schema_docs",
-                "warning": warn,
-            },
-        )
+        logger.warning(warn)
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "memory_load_user",
-            "graph_phase": "exit",
-            "user_id": user_id,
-            "has_prefs": out["preferences"] is not None,
-            "has_schema_docs": out["schema_docs_context"] is not None,
-            "memory_warning": out["memory_warning"],
-            "steps_count": len(steps),
-        },
-    )
     return out
 
 
@@ -102,16 +66,6 @@ async def memory_update_session(state: GraphState) -> dict[str, Any]:
     settings = AppMemorySettings()
     user_id = state.get("user_id") or settings.default_user_id
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "memory_update_session",
-            "graph_phase": "enter",
-            "user_id": user_id,
-            "steps_count": len(steps),
-        },
-    )
-
     session_delta = snapshot_session_fields(state)
     out: dict[str, Any] = {"steps": steps, **session_delta}
 
@@ -120,22 +74,9 @@ async def memory_update_session(state: GraphState) -> dict[str, Any]:
         try:
             store = UserPreferencesStore(settings)
             store.upsert(user_id, prefs)
-        except psycopg.OperationalError as exc:
-            warn = f"could not persist preferences: {type(exc).__name__}"
+        except psycopg.OperationalError:
+            warn = "could not persist preferences"
             out["memory_warning"] = warn
-            logger.warning(
-                "memory_update_session_db_error",
-                extra={"graph_node": "memory_update_session", "warning": warn},
-            )
+            logger.warning(warn)
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "memory_update_session",
-            "graph_phase": "exit",
-            "user_id": user_id,
-            "preferences_dirty": bool(state.get("preferences_dirty")),
-            "steps_count": len(steps),
-        },
-    )
     return out

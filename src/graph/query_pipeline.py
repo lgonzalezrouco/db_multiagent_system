@@ -13,11 +13,7 @@ from agents.query_agent import build_query_plan, build_sql
 from config import MCPSettings
 from graph import mcp_helpers
 from graph.state import GraphState
-from mcp_server.readonly_sql import (
-    mask_sql_for_analysis,
-    truncate_sql_preview,
-    validate_readonly_sql,
-)
+from mcp_server.readonly_sql import mask_sql_for_analysis, validate_readonly_sql
 
 logger = logging.getLogger(__name__)
 
@@ -67,38 +63,8 @@ async def query_load_context(state: GraphState) -> dict[str, Any]:
     steps.append(f"gate:{gate_decision}")
     steps.append("query_load_context")
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_load_context",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "gate_decision": gate_decision,
-        },
-    )
-    if mcp_helpers.graph_debug():
-        logger.debug(
-            "graph_node_debug_snapshot",
-            extra={
-                "graph_node": "query_load_context",
-                "graph_phase": "enter_debug",
-                "state_keys": sorted(state.keys()),
-            },
-        )
-
     schema_docs_context: dict[str, Any] | None = state.get("schema_docs_context")
     schema_docs_warning: str | None = state.get("schema_docs_warning")
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_load_context",
-            "graph_phase": "exit",
-            "steps_count": len(steps),
-            "schema_docs_loaded": schema_docs_context is not None,
-        },
-    )
 
     return {
         "steps": steps,
@@ -123,16 +89,6 @@ async def query_plan(state: GraphState) -> dict[str, Any]:
     steps.append("query_plan")
     ctx = state.get("schema_docs_context")
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_plan",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-        },
-    )
-
     raw_prefs = state.get("preferences")
     prefs = raw_prefs if isinstance(raw_prefs, dict) else None
     try:
@@ -143,17 +99,8 @@ async def query_plan(state: GraphState) -> dict[str, Any]:
         )
     except Exception as exc:
         msg = f"Query plan LLM error: {type(exc).__name__}: {exc}"
-        logger.exception("query_plan_failed")
+        logger.exception("Query plan LLM call failed: %s", msg)
         return {"steps": steps, "query_plan": {}, "last_error": msg}
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_plan",
-            "graph_phase": "exit",
-            "steps_count": len(steps),
-        },
-    )
 
     return {"steps": steps, "query_plan": plan}
 
@@ -161,17 +108,6 @@ async def query_plan(state: GraphState) -> dict[str, Any]:
 async def query_generate_sql(state: GraphState) -> dict[str, Any]:
     steps = list(state.get("steps", []))
     steps.append("query_generate_sql")
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_generate_sql",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "refinement_count": int(state.get("refinement_count") or 0),
-        },
-    )
 
     ctx = state.get("schema_docs_context")
     raw_prefs = state.get("preferences")
@@ -197,17 +133,8 @@ async def query_generate_sql(state: GraphState) -> dict[str, Any]:
         )
     except Exception as exc:
         msg = f"SQL generation LLM error: {type(exc).__name__}: {exc}"
-        logger.exception("query_generate_sql_failed")
+        logger.exception("SQL generation LLM call failed: %s", msg)
         return {"steps": steps, "generated_sql": "", "last_error": msg}
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_generate_sql",
-            "graph_phase": "exit",
-            "steps_count": len(steps),
-        },
-    )
 
     return {"steps": steps, "generated_sql": sql}
 
@@ -217,50 +144,18 @@ async def query_critic(state: GraphState) -> dict[str, Any]:
     steps.append("query_critic")
 
     sql = state.get("generated_sql")
-    sql_preview = truncate_sql_preview(str(sql) if sql else "")
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_critic",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "sql_preview": sql_preview,
-        },
-    )
 
     ok, feedback = validate_sql_for_execution(sql if isinstance(sql, str) else None)
 
     if ok:
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "query_critic",
-                "graph_phase": "exit",
-                "critic_status": "accept",
-                "sql_preview": sql_preview,
-                "steps_count": len(steps),
-            },
-        )
         return {
             "steps": steps,
             "critic_status": "accept",
             "critic_feedback": None,
         }
 
+    logger.warning("SQL validation failed (critic reject): %s", feedback)
     rc = int(state.get("refinement_count") or 0) + 1
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_critic",
-            "graph_phase": "exit",
-            "critic_status": "reject",
-            "sql_preview": sql_preview,
-            "refinement_count": rc,
-            "steps_count": len(steps),
-        },
-    )
     return {
         "steps": steps,
         "critic_status": "reject",
@@ -274,16 +169,6 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
     steps.append("query_execute")
 
     sql = state.get("generated_sql") or ""
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_execute",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "sql_preview": truncate_sql_preview(str(sql)),
-        },
-    )
 
     out: dict[str, Any] = {
         "steps": steps,
@@ -298,16 +183,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
         exec_tool = next((t for t in tools if t.name == "execute_readonly_sql"), None)
         if exec_tool is None:
             out["last_error"] = "MCP tool execute_readonly_sql not found"
-            logger.info(
-                "graph_node_transition",
-                extra={
-                    "graph_node": "query_execute",
-                    "graph_phase": "exit",
-                    "mcp_status": "error",
-                    "steps_count": len(steps),
-                    "result_summary": "tool_missing",
-                },
-            )
+            logger.error("%s", out["last_error"])
             return out
 
         raw = await exec_tool.ainvoke({"sql": sql})
@@ -315,16 +191,7 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
         out["query_execution_result"] = payload
 
         if isinstance(payload, dict) and payload.get("success"):
-            logger.info(
-                "graph_node_transition",
-                extra={
-                    "graph_node": "query_execute",
-                    "graph_phase": "exit",
-                    "mcp_status": "success",
-                    "steps_count": len(steps),
-                    "result_summary": "ok",
-                },
-            )
+            pass
         else:
             err = (payload or {}).get("error") if isinstance(payload, dict) else None
             err_type = (
@@ -332,54 +199,25 @@ async def query_execute(state: GraphState) -> dict[str, Any]:
             )
             if not isinstance(payload, dict):
                 out["last_error"] = "could not parse MCP tool result"
-            logger.info(
-                "graph_node_transition",
-                extra={
-                    "graph_node": "query_execute",
-                    "graph_phase": "exit",
-                    "mcp_status": "error",
-                    "steps_count": len(steps),
-                    "result_summary": f"mcp_error_type={err_type}",
-                },
-            )
+                logger.error(
+                    "could not parse MCP tool result from execute_readonly_sql",
+                )
+            else:
+                logger.warning(
+                    "MCP execute_readonly_sql returned failure: error_type=%s",
+                    err_type,
+                )
 
     except ValidationError as exc:
         out["last_error"] = mcp_helpers.format_settings_validation_error(exc)
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "query_execute",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "settings_validation_error",
-            },
-        )
+        logger.error("MCP settings validation failed: %s", out["last_error"])
     except OSError as exc:
         out["last_error"] = f"MCP connection error: {type(exc).__name__}"
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "query_execute",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "connection_error",
-            },
-        )
+        logger.error("MCP connection error: %s", exc)
     except Exception as exc:
         exc_name = type(exc).__name__
         out["last_error"] = f"Unexpected error: {exc_name}"
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "query_execute",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": exc_name,
-            },
-        )
+        logger.exception("Unexpected error during query_execute")
 
     return out
 
@@ -398,30 +236,11 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
     steps = list(state.get("steps", []))
     steps.append("query_explain")
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_explain",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-        },
-    )
-
     err_early = state.get("last_error")
     payload = state.get("query_execution_result")
     sql = state.get("generated_sql") or ""
 
     if err_early:
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "query_explain",
-                "graph_phase": "exit",
-                "steps_count": len(steps),
-                "result_summary": "execution_error",
-            },
-        )
         return {
             "steps": steps,
             "last_error": err_early,
@@ -435,15 +254,7 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
             err = payload.get("error")
             if isinstance(err, dict) and err.get("message"):
                 msg = str(err["message"])
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "query_explain",
-                "graph_phase": "exit",
-                "steps_count": len(steps),
-                "result_summary": "no_success_payload",
-            },
-        )
+        logger.warning("%s", msg)
         return {
             "steps": steps,
             "last_error": msg,
@@ -478,16 +289,6 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
         "limitations": limitations,
     }
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_explain",
-            "graph_phase": "exit",
-            "steps_count": len(steps),
-            "result_summary": "query_answer",
-        },
-    )
-
     return {
         "steps": steps,
         "last_result": last_result,
@@ -501,28 +302,7 @@ async def query_refine_cap(state: GraphState) -> dict[str, Any]:
     steps.append("query_refine_cap")
 
     msg = "Critic rejected SQL after max refinement attempts."
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_refine_cap",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "refinement_count": int(state.get("refinement_count") or 0),
-        },
-    )
-
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "query_refine_cap",
-            "graph_phase": "exit",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "refinement_count": int(state.get("refinement_count") or 0),
-        },
-    )
+    logger.warning("%s", msg)
 
     return {
         "steps": steps,

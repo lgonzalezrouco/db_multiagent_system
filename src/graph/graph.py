@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-import os
 from typing import Any
 
 from langchain_core.runnables import RunnableConfig
@@ -31,7 +29,22 @@ from graph.schema_pipeline import (
 )
 from graph.state import GraphState
 
-logger = logging.getLogger(__name__)
+
+def build_traceable_config(
+    *,
+    base: RunnableConfig,
+    user_id: str,
+    session_id: str,
+    thread_id: str,
+) -> RunnableConfig:
+    """Merge LangGraph/LangSmith trace fields without dropping ``configurable``."""
+    meta = {
+        "user_id": user_id,
+        "session_id": session_id,
+        "thread_id": thread_id,
+    }
+    tags = ["dvdrental-agent", "langgraph"]
+    return {**base, "metadata": meta, "tags": tags}
 
 
 def graph_run_config(
@@ -45,18 +58,22 @@ def graph_run_config(
     thread_id goes into configurable (required by MemorySaver).
     user_id goes into initial state so routing never reads from configurable.
     session_id defaults to thread_id for an optional display/logging label.
+
+    ``metadata`` and ``tags`` are set for LangSmith filtering.
     """
     s = AppMemorySettings()
     tid = thread_id or s.default_thread_id
     uid = user_id or s.default_user_id
     sid = session_id if session_id is not None else tid
-    config: RunnableConfig = {"configurable": {"thread_id": tid}}
+    base: RunnableConfig = {"configurable": {"thread_id": tid}}
+    config = build_traceable_config(
+        base=base,
+        user_id=uid,
+        session_id=sid,
+        thread_id=tid,
+    )
     state_seed: dict = {"user_id": uid, "session_id": sid}
     return config, state_seed
-
-
-def _graph_debug() -> bool:
-    return os.environ.get("GRAPH_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
@@ -66,17 +83,7 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     def route_after_start(_state: GraphState) -> str:
         presence_result = resolved.check()
         ready = presence_result.ready
-        decision = "query_path" if ready else "schema_path"
-        logger.info(
-            "graph_gate_decision",
-            extra={
-                "graph_phase": "gate",
-                "gate_decision": decision,
-                "schema_ready": ready,
-                "presence_reason": presence_result.reason,
-            },
-        )
-        return decision
+        return "query_path" if ready else "schema_path"
 
     workflow: StateGraph = StateGraph(GraphState)
 

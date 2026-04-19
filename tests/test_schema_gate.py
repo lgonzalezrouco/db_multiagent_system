@@ -1,8 +1,7 @@
-"""Schema-presence gate: graph branches, DbSchemaPresence, gate logging."""
+"""Schema-presence gate: graph branches, DbSchemaPresence."""
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 import pytest
@@ -121,43 +120,3 @@ def test_db_schema_presence_with_not_ready_store() -> None:
     result = presence.check()
     assert result.ready is False
     assert result.reason is not None
-
-
-@pytest.mark.asyncio
-async def test_gate_router_logs_decision(
-    postgres_env: None,
-    monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
-) -> None:
-    class _ExecTool:
-        name = "execute_readonly_sql"
-
-        async def ainvoke(self, _input: dict[str, Any]) -> dict[str, Any]:
-            return {"success": True, "rows_returned": 0, "rows": [], "columns": []}
-
-    class _FakeClient:
-        async def get_tools(self) -> list[_ExecTool]:
-            return [_ExecTool()]
-
-    async def _fake_client(_settings: Any) -> _FakeClient:
-        return _FakeClient()
-
-    monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
-
-    with caplog.at_level(logging.INFO, logger="graph.graph"):
-        app = get_compiled_graph(presence=ReadySchemaPresence())
-        cfg, state_seed = graph_run_config(thread_id="gate-log-1")
-        await app.ainvoke(
-            {"user_input": "ignored for routing", "steps": [], **state_seed},
-            config=cfg,
-        )
-
-    gate_records = [
-        r
-        for r in caplog.records
-        if r.name == "graph.graph" and getattr(r, "graph_phase", None) == "gate"
-    ]
-    assert gate_records, "expected graph_gate_decision log"
-    last = gate_records[-1]
-    assert getattr(last, "gate_decision", None) == "query_path"
-    assert getattr(last, "schema_ready", None) is True

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-import os
 from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
@@ -31,10 +30,6 @@ def inspect_schema_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
         "success": False,
         "error_type": err_type,
     }
-
-
-def graph_debug() -> bool:
-    return os.environ.get("GRAPH_DEBUG", "").lower() in ("1", "true", "yes")
 
 
 def tool_result_to_dict(raw: Any) -> dict[str, Any] | None:

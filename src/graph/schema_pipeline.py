@@ -73,26 +73,6 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
     steps.append(f"gate:{gate_decision}")
     steps.append("schema_inspect")
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "schema_inspect",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-            "gate_decision": gate_decision,
-        },
-    )
-    if mcp_helpers.graph_debug():
-        logger.debug(
-            "graph_node_debug_snapshot",
-            extra={
-                "graph_node": "schema_inspect",
-                "graph_phase": "enter_debug",
-                "state_keys": sorted(state.keys()),
-            },
-        )
-
     out: dict[str, Any] = {
         "steps": steps,
         "last_error": None,
@@ -110,16 +90,7 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
         if inspect_tool is None:
             msg = "MCP tool inspect_schema not found"
             out["last_error"] = msg
-            logger.info(
-                "graph_node_transition",
-                extra={
-                    "graph_node": "schema_inspect",
-                    "graph_phase": "exit",
-                    "mcp_status": "error",
-                    "steps_count": len(steps),
-                    "result_summary": "tool_missing",
-                },
-            )
+            logger.error("%s", msg)
             return out
 
         raw = await inspect_tool.ainvoke({"schema_name": "public", "table_name": None})
@@ -127,16 +98,6 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
         if payload and payload.get("success"):
             out["schema_metadata"] = payload
             out["last_result"] = mcp_helpers.inspect_schema_summary(payload)
-            logger.info(
-                "graph_node_transition",
-                extra={
-                    "graph_node": "schema_inspect",
-                    "graph_phase": "exit",
-                    "mcp_status": "success",
-                    "steps_count": len(steps),
-                    "result_summary": "inspect_schema_ok",
-                },
-            )
         else:
             err = (payload or {}).get("error") if isinstance(payload, dict) else None
             err_type = (
@@ -149,53 +110,17 @@ async def schema_inspect(state: GraphState) -> dict[str, Any]:
             )
             out["last_result"] = mcp_helpers.inspect_schema_summary(payload)
             out["schema_metadata"] = payload if isinstance(payload, dict) else None
-            logger.info(
-                "graph_node_transition",
-                extra={
-                    "graph_node": "schema_inspect",
-                    "graph_phase": "exit",
-                    "mcp_status": "error",
-                    "steps_count": len(steps),
-                    "result_summary": f"mcp_error_type={err_type}",
-                },
-            )
+            logger.warning("inspect_schema failed: %s", out["last_error"])
     except ValidationError as exc:
         out["last_error"] = mcp_helpers.format_settings_validation_error(exc)
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_inspect",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "settings_validation_error",
-            },
-        )
+        logger.error("MCP settings validation failed: %s", out["last_error"])
     except OSError as exc:
         out["last_error"] = f"MCP connection error: {type(exc).__name__}"
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_inspect",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "connection_error",
-            },
-        )
+        logger.error("MCP connection error during inspect_schema: %s", exc)
     except Exception as exc:
         exc_name = type(exc).__name__
         out["last_error"] = f"Unexpected error: {exc_name}"
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_inspect",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": exc_name,
-            },
-        )
+        logger.exception("Unexpected error during schema_inspect")
 
     return out
 
@@ -204,15 +129,6 @@ async def schema_draft(state: GraphState) -> dict[str, Any]:
     """Build ``schema_draft`` from ``schema_metadata`` via structured LLM output."""
     steps = list(state.get("steps", []))
     steps.append("schema_draft")
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "schema_draft",
-            "graph_phase": "enter",
-            "user_input_preview": mcp_helpers.user_input_preview(state),
-            "steps_count": len(steps),
-        },
-    )
     meta = state.get("schema_metadata")
     meta_dict = meta if isinstance(meta, dict) else None
     raw_prefs = state.get("preferences")
@@ -225,18 +141,9 @@ async def schema_draft(state: GraphState) -> dict[str, Any]:
         )
     except Exception as exc:
         msg = f"Schema draft LLM error: {type(exc).__name__}: {exc}"
-        logger.exception("schema_draft_failed")
+        logger.exception("Schema draft LLM call failed: %s", msg)
         return {"schema_draft": None, "steps": steps, "last_error": msg}
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "schema_draft",
-            "graph_phase": "exit",
-            "steps_count": len(steps),
-            "result_summary": f"table_count={len(draft.get('tables') or [])}",
-        },
-    )
     return {"schema_draft": draft, "steps": steps}
 
 
@@ -252,25 +159,7 @@ def schema_hitl(state: GraphState) -> dict[str, Any]:
         "kind": "schema_review",
         "draft": draft,
     }
-    table_n = len((draft or {}).get("tables") or []) if isinstance(draft, dict) else 0
-    logger.info(
-        "hitl_interrupt",
-        extra={
-            "graph_node": "schema_hitl",
-            "graph_phase": "hitl",
-            "hitl_kind": hitl_payload.get("kind"),
-            "draft_table_count": table_n,
-        },
-    )
     approved = interrupt(hitl_payload)
-    logger.info(
-        "hitl_resume",
-        extra={
-            "graph_node": "schema_hitl",
-            "graph_phase": "hitl",
-            "resume_type": type(approved).__name__,
-        },
-    )
     steps.append("schema_hitl")
     return {
         "schema_approved": approved,
@@ -284,15 +173,6 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
     steps = list(state.get("steps", []))
     steps.append("schema_persist")
 
-    logger.info(
-        "graph_node_transition",
-        extra={
-            "graph_node": "schema_persist",
-            "graph_phase": "enter",
-            "steps_count": len(steps),
-        },
-    )
-
     out: dict[str, Any] = {"steps": steps, "persist_error": None}
 
     approved = state.get("schema_approved")
@@ -301,16 +181,7 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
         out["persist_error"] = err
         out["last_error"] = err
         out["last_result"] = None
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_persist",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "validation_error",
-            },
-        )
+        logger.error("schema_persist validation failed: %s", err)
         return out
 
     updated = _utc_now_iso()
@@ -337,30 +208,11 @@ def schema_persist(state: GraphState) -> dict[str, Any]:
             "table_count": len(tables),
         }
         out["last_error"] = None
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_persist",
-                "graph_phase": "exit",
-                "mcp_status": "success",
-                "steps_count": len(steps),
-                "result_summary": f"table_count={len(tables)}",
-            },
-        )
     except psycopg.OperationalError as exc:
         msg = f"could not persist schema docs: {type(exc).__name__}"
         out["persist_error"] = msg
         out["last_error"] = msg
         out["last_result"] = None
-        logger.info(
-            "graph_node_transition",
-            extra={
-                "graph_node": "schema_persist",
-                "graph_phase": "exit",
-                "mcp_status": "error",
-                "steps_count": len(steps),
-                "result_summary": "db_error",
-            },
-        )
+        logger.error("could not persist schema docs: %s", exc)
 
     return out
