@@ -41,7 +41,7 @@ database.
 The statement must include a LIMIT clause. Read-only only
 (no INSERT/UPDATE/DELETE/etc.).
 If a Conversation history block is present, resolve any anaphoric references
-before planning.
+before generating SQL.
 """
 
 QUERY_CRITIC_INSTRUCTIONS = """Review the generated SQL against the user question as a

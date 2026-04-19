@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 # ---------------------------------------------------------------------------
 
 
-def append_steps(current: list[str], update: list[str]) -> list[str]:
+def append_steps(current: list[str], update: list[str] | None) -> list[str]:
     """Extend the steps list with new entries from a node update."""
     return current + (update or [])
 

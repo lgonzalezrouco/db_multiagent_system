@@ -116,6 +116,37 @@ def test_snapshot_session_fields_skips_when_no_sql() -> None:
     assert delta == {}
 
 
+def test_snapshot_session_fields_skips_on_last_error() -> None:
+    """Snapshot does not append when the turn ended with last_error set."""
+    state = GraphState(
+        user_input="bad query",
+        last_error="Critic rejected SQL after max refinement attempts.",
+        query=QueryPipelineState(
+            generated_sql="SELECT 1",
+            execution_result={"success": True, "rows_returned": 0},
+        ),
+    )
+
+    delta = snapshot_session_fields(state)
+
+    assert delta == {}
+
+
+def test_snapshot_session_fields_skips_on_failed_execution() -> None:
+    """Snapshot does not append when execution_result.success is False."""
+    state = GraphState(
+        user_input="broken query",
+        query=QueryPipelineState(
+            generated_sql="SELECT * FROM missing_table LIMIT 1",
+            execution_result={"success": False, "error": {"type": "database_error"}},
+        ),
+    )
+
+    delta = snapshot_session_fields(state)
+
+    assert delta == {}
+
+
 def test_snapshot_caps_history_at_max_turns() -> None:
     """Snapshot enforces the HISTORY_MAX_TURNS cap (oldest discarded)."""
     from graph.state import ConversationTurn
@@ -431,12 +462,13 @@ async def test_memory_update_session_upserts_when_dirty(
     )
 
     # When: updating session
-    await memory_update_session(state)
+    result = await memory_update_session(state)
 
-    # Then: preferences are persisted
+    # Then: preferences are persisted and dirty flag is cleared
     assert len(upserted) == 1
     assert upserted[0]["user_id"] == "bob"
     assert upserted[0]["prefs"]["preferred_language"] == "fr"
+    assert result.get("memory", {}).get("preferences_dirty") is False
 
 
 @pytest.mark.asyncio

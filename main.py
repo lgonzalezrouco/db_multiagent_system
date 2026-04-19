@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from config import PostgresSettings
 from graph import get_compiled_graph, graph_run_config
 from graph.invoke_v2 import unwrap_graph_v2
+from graph.state import GraphState
 
 logger = logging.getLogger(__name__)
 
@@ -78,13 +79,11 @@ def _print_query_answer(payload: dict[str, Any]) -> None:
         print(f"\n{lim}\n")
 
 
-def _print_outcome(state: Any) -> None:
-    err = state.last_error if hasattr(state, "last_error") else state.get("last_error")
+def _print_outcome(state: GraphState) -> None:
+    err = state.last_error
     if err:
         print(f"\nError: {err}\n", file=sys.stderr)
-    lr = (
-        state.last_result if hasattr(state, "last_result") else state.get("last_result")
-    )
+    lr = state.last_result
     if not lr:
         if not err:
             print("\n(no last_result in state)\n")
@@ -183,7 +182,7 @@ async def _interactive_chat(
         "Commands: empty line or /quit to exit.\n",
     )
 
-    async def one_turn(user_input: str) -> dict[str, Any]:
+    async def one_turn(user_input: str) -> GraphState:
         initial: dict[str, Any] = {
             "user_input": user_input,
             "steps": [],
@@ -194,12 +193,7 @@ async def _interactive_chat(
     if initial_question:
         state = await one_turn(initial_question)
         _print_outcome(state)
-        last_err = (
-            state.last_error
-            if hasattr(state, "last_error")
-            else state.get("last_error")
-        )
-        if last_err:
+        if state.last_error:
             return 1
         if not sys.stdin.isatty():
             return 0

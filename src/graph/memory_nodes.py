@@ -27,8 +27,11 @@ async def memory_load_user(state: GraphState) -> dict[str, Any]:
         "memory": {"warning": None},
         "query": {"docs_context": None, "docs_warning": None},
     }
-    # Preserve conversation history across the turn boundary
-    out.update(seed_session_fields(state))
+    # Preserve conversation history without overwriting the initialised warning field
+    session_seed = seed_session_fields(state)
+    out.update({k: v for k, v in session_seed.items() if k != "memory"})
+    if "memory" in session_seed:
+        out["memory"] = {**out.get("memory", {}), **session_seed["memory"]}
 
     try:
         pref_store = UserPreferencesStore(settings)
@@ -79,6 +82,9 @@ async def memory_update_session(state: GraphState) -> dict[str, Any]:
         try:
             store = UserPreferencesStore(settings)
             store.upsert(user_id, prefs)
+            # Clear the dirty flag so subsequent turns don't re-upsert unchanged prefs
+            existing = out.get("memory", {})
+            out["memory"] = {**existing, "preferences_dirty": False}
         except psycopg.OperationalError:
             warn = "could not persist preferences"
             existing = out.get("memory", {})

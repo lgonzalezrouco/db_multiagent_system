@@ -78,7 +78,13 @@ def snapshot_session_fields(state: GraphState) -> dict[str, Any]:
         # Schema turns / error turns — do not pollute history
         return {}
 
+    # Do not record turns that ended with an error or a failed execution
+    if state.last_error:
+        return {}
+
     execution_result = state.query.execution_result
+    if not isinstance(execution_result, dict) or not execution_result.get("success"):
+        return {}
     row_count: int | None = None
     if isinstance(execution_result, dict):
         row_count = execution_result.get("row_count") or execution_result.get(
