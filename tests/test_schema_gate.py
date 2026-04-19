@@ -64,7 +64,7 @@ async def test_query_path_runs_query_pipeline_when_ready(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="gate-query-1")
+    cfg, state_seed = graph_run_config(thread_id="gate-query-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "count something", "steps": [], **state_seed},
         config=cfg,

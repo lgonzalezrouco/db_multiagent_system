@@ -55,7 +55,9 @@ async def test_query_pipeline_via_live_mcp_http(
         monkeypatch.setenv("MCP_SERVER_URL", f"http://127.0.0.1:{port}/mcp")
 
         app = get_compiled_graph(presence=ReadySchemaPresence())
-        cfg, state_seed = graph_run_config(thread_id="mcp-integration-1")
+        cfg, state_seed = graph_run_config(
+            thread_id="mcp-integration-1", run_kind="pytest"
+        )
         result = await app.ainvoke(
             {"user_input": "integration", "steps": [], **state_seed},
             config=cfg,

@@ -101,7 +101,7 @@ async def test_critic_retry_then_success(
     monkeypatch.setattr("graph.query_pipeline.build_sql", _build_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="query-retry-1")
+    cfg, state_seed = graph_run_config(thread_id="query-retry-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "count actors", "steps": [], **state_seed},
         config=cfg,
@@ -160,7 +160,7 @@ async def test_refinement_cap_skips_mcp_execute(
     monkeypatch.setattr("graph.query_pipeline.build_sql", _bad_sql)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="query-cap-1")
+    cfg, state_seed = graph_run_config(thread_id="query-cap-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "never lands", "steps": [], **state_seed},
         config=cfg,
@@ -233,7 +233,7 @@ async def test_missing_schema_docs_sets_warning(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="query-docs-1")
+    cfg, state_seed = graph_run_config(thread_id="query-docs-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "smoke", "steps": [], **state_seed},
         config=cfg,
@@ -277,7 +277,7 @@ async def test_query_explain_uses_mcp_error_message(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1")
+    cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "broken query path", "steps": [], **state_seed},
         config=cfg,

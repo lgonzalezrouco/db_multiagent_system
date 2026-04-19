@@ -30,21 +30,45 @@ from graph.schema_pipeline import (
 from graph.state import GraphState
 
 
+def _merge_trace_tags(base_tags: list[str] | None, *, run_kind: str) -> list[str]:
+    """Extend caller tags with defaults; dedupe while preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for t in base_tags or []:
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    for t in ("dvdrental-agent", "langgraph", run_kind):
+        if t not in seen:
+            seen.add(t)
+            out.append(t)
+    return out
+
+
 def build_traceable_config(
     *,
     base: RunnableConfig,
     user_id: str,
     session_id: str,
     thread_id: str,
+    run_kind: str = "cli",
 ) -> RunnableConfig:
-    """Merge LangGraph/LangSmith trace fields without dropping ``configurable``."""
-    meta = {
+    """Merge LangGraph/LangSmith trace fields without dropping upstream config."""
+    merged_meta = {
+        **(base.get("metadata") or {}),
         "user_id": user_id,
         "session_id": session_id,
         "thread_id": thread_id,
+        "run_kind": run_kind,
     }
-    tags = ["dvdrental-agent", "langgraph"]
-    return {**base, "metadata": meta, "tags": tags}
+    configurable = {**(base.get("configurable") or {}), "thread_id": thread_id}
+    tags = _merge_trace_tags(base.get("tags"), run_kind=run_kind)
+    return {
+        **base,
+        "configurable": configurable,
+        "metadata": merged_meta,
+        "tags": tags,
+    }
 
 
 def graph_run_config(
@@ -52,6 +76,7 @@ def graph_run_config(
     thread_id: str | None = None,
     user_id: str | None = None,
     session_id: str | None = None,
+    run_kind: str = "cli",
 ) -> tuple[RunnableConfig, dict]:
     """Return (config, initial_state_overrides) for invoke/ainvoke.
 
@@ -59,7 +84,8 @@ def graph_run_config(
     user_id goes into initial state so routing never reads from configurable.
     session_id defaults to thread_id for an optional display/logging label.
 
-    ``metadata`` and ``tags`` are set for LangSmith filtering.
+    ``metadata`` and ``tags`` are set for LangSmith filtering (including ``run_kind``
+    for cli vs pytest, etc.).
     """
     s = AppMemorySettings()
     tid = thread_id or s.default_thread_id
@@ -71,6 +97,7 @@ def graph_run_config(
         user_id=uid,
         session_id=sid,
         thread_id=tid,
+        run_kind=run_kind,
     )
     state_seed: dict = {"user_id": uid, "session_id": sid}
     return config, state_seed

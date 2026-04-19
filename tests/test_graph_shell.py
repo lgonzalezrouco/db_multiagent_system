@@ -74,7 +74,7 @@ async def test_graph_ainvoke_smoke_mocked_mcp(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="shell-smoke-1")
+    cfg, state_seed = graph_run_config(thread_id="shell-smoke-1", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
@@ -117,7 +117,7 @@ async def test_graph_ainvoke_works_without_postgres_env_vars(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="shell-smoke-2")
+    cfg, state_seed = graph_run_config(thread_id="shell-smoke-2", run_kind="pytest")
     result = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
@@ -149,7 +149,7 @@ async def test_query_pipeline_clears_last_result_on_tool_error(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     app = get_compiled_graph(presence=ReadySchemaPresence())
-    cfg, state_seed = graph_run_config(thread_id="shell-error-1")
+    cfg, state_seed = graph_run_config(thread_id="shell-error-1", run_kind="pytest")
     result = await app.ainvoke(
         {
             "user_input": "ping",
