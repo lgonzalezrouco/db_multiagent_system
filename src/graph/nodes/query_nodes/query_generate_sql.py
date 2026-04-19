@@ -18,6 +18,8 @@ async def query_generate_sql(state: GraphState) -> dict[str, Any]:
         else None
     )
     qp = state.query.plan if isinstance(state.query.plan, dict) else None
+    history = state.memory.conversation_history or []
+    history_dicts = [t.model_dump(mode="json") for t in history] if history else None
     try:
         sql = await build_sql(
             state.user_input or "",
@@ -26,6 +28,7 @@ async def query_generate_sql(state: GraphState) -> dict[str, Any]:
             int(state.query.refinement_count or 0),
             critic_feedback=cf,
             preferences=prefs if isinstance(prefs, dict) else None,
+            conversation_history=history_dicts,
         )
     except Exception as exc:
         msg = f"SQL generation LLM error: {type(exc).__name__}: {exc}"

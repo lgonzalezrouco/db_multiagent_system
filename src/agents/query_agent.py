@@ -33,11 +33,25 @@ def _compact_json(data: Any, *, max_chars: int = 12000) -> str:
     return raw[:max_chars] + "\n... (truncated)"
 
 
+def _history_block(conversation_history: list[dict] | None) -> str | None:
+    """Serialise conversation history for inclusion in a human message.
+
+    Returns ``None`` when the history is empty or absent so callers can
+    skip appending an empty block.
+    """
+    if not conversation_history:
+        return None
+    return "Conversation history (JSON, oldest-first):\n" + _compact_json(
+        conversation_history
+    )
+
+
 async def build_query_plan(
     user_input: str,
     *,
     schema_docs_context: dict[str, Any] | None,
     preferences: dict[str, Any] | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> dict[str, Any]:
     llm = create_chat_llm()
     structured = llm.with_structured_output(QueryPlanOutput)
@@ -54,6 +68,9 @@ async def build_query_plan(
         human_parts.append(
             "User preferences (JSON):\n" + _compact_json(preferences),
         )
+    history_str = _history_block(conversation_history)
+    if history_str:
+        human_parts.append(history_str)
     messages = [
         SystemMessage(content=QUERY_SYSTEM_MESSAGE),
         HumanMessage(content="\n\n".join(human_parts)),
@@ -71,6 +88,7 @@ async def build_sql(
     *,
     critic_feedback: str | None = None,
     preferences: dict[str, Any] | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> str:
     llm = create_chat_llm()
     structured = llm.with_structured_output(SqlGenerationOutput)
@@ -97,6 +115,9 @@ async def build_sql(
         human_parts.append(
             "Address this critic feedback in your revised SQL:\n" + critic_feedback,
         )
+    history_str = _history_block(conversation_history)
+    if history_str:
+        human_parts.append(history_str)
     messages = [
         SystemMessage(content=QUERY_SYSTEM_MESSAGE),
         HumanMessage(content="\n\n".join(human_parts)),
@@ -116,6 +137,7 @@ async def build_query_critique(
     query_plan: dict[str, Any] | None,
     schema_docs_context: dict[str, Any] | None,
     preferences: dict[str, Any] | None = None,
+    conversation_history: list[dict] | None = None,
 ) -> dict[str, Any]:
     llm = create_chat_llm()
     structured = llm.with_structured_output(QueryCritiqueOutput)
@@ -137,6 +159,9 @@ async def build_query_critique(
         human_parts.append(
             "User preferences (JSON):\n" + _compact_json(preferences),
         )
+    history_str = _history_block(conversation_history)
+    if history_str:
+        human_parts.append(history_str)
     messages = [
         SystemMessage(content=QUERY_SYSTEM_MESSAGE),
         HumanMessage(content="\n\n".join(human_parts)),

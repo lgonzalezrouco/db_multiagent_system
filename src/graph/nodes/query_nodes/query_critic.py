@@ -100,6 +100,8 @@ async def query_critic(state: GraphState) -> dict[str, Any]:
     schema_docs_context = (
         state.query.docs_context if isinstance(state.query.docs_context, dict) else None
     )
+    history = state.memory.conversation_history or []
+    history_dicts = [t.model_dump(mode="json") for t in history] if history else None
 
     try:
         critique = await build_query_critique(
@@ -108,6 +110,7 @@ async def query_critic(state: GraphState) -> dict[str, Any]:
             query_plan=query_plan,
             schema_docs_context=schema_docs_context,
             preferences=prefs if isinstance(prefs, dict) else None,
+            conversation_history=history_dicts,
         )
     except Exception as exc:
         logger.exception("Semantic SQL critic LLM call failed")
