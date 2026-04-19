@@ -133,10 +133,18 @@ async def query_plan(state: GraphState) -> dict[str, Any]:
         },
     )
 
-    plan = build_query_plan(
-        state.get("user_input", "") or "",
-        schema_docs_context=ctx if isinstance(ctx, dict) else None,
-    )
+    raw_prefs = state.get("preferences")
+    prefs = raw_prefs if isinstance(raw_prefs, dict) else None
+    try:
+        plan = await build_query_plan(
+            state.get("user_input", "") or "",
+            schema_docs_context=ctx if isinstance(ctx, dict) else None,
+            preferences=prefs,
+        )
+    except Exception as exc:
+        msg = f"Query plan LLM error: {type(exc).__name__}: {exc}"
+        logger.exception("query_plan_failed")
+        return {"steps": steps, "query_plan": {}, "last_error": msg}
 
     logger.info(
         "graph_node_transition",
@@ -166,12 +174,31 @@ async def query_generate_sql(state: GraphState) -> dict[str, Any]:
     )
 
     ctx = state.get("schema_docs_context")
-    sql = build_sql(
-        state.get("user_input", "") or "",
-        state.get("query_plan") if isinstance(state.get("query_plan"), dict) else None,
-        ctx if isinstance(ctx, dict) else None,
-        int(state.get("refinement_count") or 0),
+    raw_prefs = state.get("preferences")
+    prefs = raw_prefs if isinstance(raw_prefs, dict) else None
+    cf = (
+        state.get("critic_feedback")
+        if isinstance(state.get("critic_feedback"), str)
+        else None
     )
+    try:
+        qp = (
+            state.get("query_plan")
+            if isinstance(state.get("query_plan"), dict)
+            else None
+        )
+        sql = await build_sql(
+            state.get("user_input", "") or "",
+            qp,
+            ctx if isinstance(ctx, dict) else None,
+            int(state.get("refinement_count") or 0),
+            critic_feedback=cf,
+            preferences=prefs,
+        )
+    except Exception as exc:
+        msg = f"SQL generation LLM error: {type(exc).__name__}: {exc}"
+        logger.exception("query_generate_sql_failed")
+        return {"steps": steps, "generated_sql": "", "last_error": msg}
 
     logger.info(
         "graph_node_transition",

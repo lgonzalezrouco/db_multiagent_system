@@ -3,7 +3,7 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/agents", "src/db_multiagent_system", "src/config", "src/graph", "src/memory", "src/mcp_server", "src/utils"]
+packages = ["src/agents", "src/config", "src/graph", "src/llm", "src/memory", "src/mcp_server", "src/utils"]
 
 [project]
 name = "db-multiagent-system"
@@ -12,6 +12,7 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "langchain-litellm>=0.6.4",
     "langchain-mcp-adapters>=0.2.2",
     "langgraph>=1.1.7",
     "mcp>=1.27.0",
@@ -57,13 +58,14 @@ dev = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["agents", "config", "db_multiagent_system", "graph", "memory", "mcp_server", "tests", "utils"]
+known-first-party = ["agents", "config", "graph", "llm", "memory", "mcp_server", "tests", "utils"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
 markers = [
     "integration: needs Postgres (see README)",
+    "litellm_integration: needs LLM_* env and reachable LiteLLM proxy",
 ]
 
 [tool.pyrefly]

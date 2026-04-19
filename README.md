@@ -1,15 +1,46 @@
 # db-multiagent-system
 
-Individual course project: a **natural-language query system** over PostgreSQL using **LangGraph**, two agents (schema + query), MCP tools, and memory—evaluated on the **DVD Rental** dataset.
+A **natural-language query system** over PostgreSQL built with **LangGraph**, two agents (Schema + Query), an MCP tool server, and persistent memory — evaluated on the **DVD Rental** dataset.
 
 | Doc | Role |
 | --- | --- |
 | [TASK.md](TASK.md) | Full assignment: agents, memory, MCP, deliverables, rubric |
 | [AGENTS.md](AGENTS.md) | Repo workflow: `uv`, safety rules, Git conventions, verification |
-| [specs/01-bootstrap.md](specs/01-bootstrap.md) | Bootstrap spec (layout, DB proof, tooling) |
-| [specs/02-tools-mcp.md](specs/02-tools-mcp.md) | MCP tools: schema inspection + read-only SQL, server packaging |
-| [specs/03-graph-shell.md](specs/03-graph-shell.md) | LangGraph shell: shared state, linear graph, MCP-backed query stub |
-| [specs/04-schema-gate.md](specs/04-schema-gate.md) | Gate: schema docs present for query context (not NL intent routing) |
+
+---
+
+## Architecture
+
+Runtime view: **one CLI process** runs `main.py`, compiles a **LangGraph** workflow (with **`MemorySaver`** for HITL/thread state), calls a **LiteLLM**-compatible API via **`ChatLiteLLM`**, and reaches the dataset through an **MCP** server (HTTP) using **`MultiServerMCPClient`** from **`langchain-mcp-adapters`**. Persisted app state (schema docs + user preferences) lives in a **separate Postgres** instance from the **DVD Rental** database the MCP tools query.
+
+```mermaid
+flowchart TB
+    U([User / main.py])
+
+    subgraph LG["LangGraph + MemorySaver"]
+        Gate{Schema docs ready?}
+        Schema["Schema pipeline<br/>inspect → draft → HITL → persist"]
+        Query["Query pipeline<br/>plan → SQL → critic → execute"]
+        Gate -->|no| Schema
+        Gate -->|yes| Query
+    end
+
+    LLM["LiteLLM<br/>(ChatLiteLLM)"]
+    MCP["MCP server<br/>(:8000, readonly tools)"]
+    AppMem[("Postgres app_memory<br/>:5433 — docs & prefs")]
+    DVD[("Postgres dvdrental<br/>:5432 — dataset")]
+
+    U <--> LG
+    Schema --> LLM
+    Query --> LLM
+    Schema --> MCP
+    Query --> MCP
+    Schema <--> AppMem
+    Query <--> AppMem
+    MCP --> DVD
+```
+
+**Compose topology** (three services): `postgres` (dvdrental), `mcp-server` (tools against dvdrental), `postgres-app-memory` (app_memory). The graph nodes call **`LLM_SERVICE_URL`** and **`MCP_SERVER_URL`** from the host.
 
 ---
 
@@ -17,172 +48,192 @@ Individual course project: a **natural-language query system** over PostgreSQL u
 
 - **Python** `>=3.12` (see `.python-version` / `pyproject.toml`)
 - **[uv](https://github.com/astral-sh/uv)** for environments and dependencies
-- **Docker** (or another Postgres 18 instance) for local database work
+- **Docker** for PostgreSQL (**dvdrental** + **app_memory**) and the **MCP** server container
 
 ---
 
-## 1. Clone and install dependencies
+## Quick start
 
-From the repository root:
+### 1. Install dependencies
 
 ```bash
 uv sync
 ```
 
-This creates/updates the virtualenv and installs the project (editable) plus dev tools from the lockfile.
+### 2. Start Docker services
 
----
-
-## 2. Database (Docker Compose + DVD Rental)
-
-The app talks to database **`dvdrental`** (DVD Rental sample data). [docker-compose.yml](docker-compose.yml) sets `POSTGRES_DB` to **`dvdrental`** and the healthcheck uses that same database (`pg_isready` on `dvdrental`).
-
-1. Ensure `db/dvdrental.tar` is present (used on first container init).
-2. Start Postgres (and the MCP server in this branch):
-
-   ```bash
-   docker compose up -d
-   ```
-
-3. Wait until the container is healthy:
-
-   ```bash
-   docker ps --filter name=multiagent-postgres
-   ```
-
-4. Optional sanity check (Postgres):
-
-   ```bash
-   docker exec -it multiagent-postgres psql -U postgres -d dvdrental -c '\dt'
-   ```
-
----
-
-## 3. Configuration (environment)
-
-`POSTGRES_*` are **required**; there are **no defaults in Python**. Values come from the process environment and from a **`.env`** file next to the project (loaded by `pydantic-settings`).
-
-| Step | What to do |
-| --- | --- |
-| Template | Copy [`.env.example`](.env.example) → `.env` (`cp -n .env.example .env`) |
-| Edit | Adjust only if your host, port, or credentials differ from local Compose |
-| Git | **Never commit** `.env` (it is gitignored); `.env.example` stays safe to commit |
-
-Variables:
-
-| Variable | Purpose |
-| --- | --- |
-| `POSTGRES_HOST` | Host (e.g. `localhost`) |
-| `POSTGRES_PORT` | Port (e.g. `5432`) |
-| `POSTGRES_USER` | Role (matches Compose: `postgres`) |
-| `POSTGRES_PASSWORD` | Password (matches Compose in dev) |
-| `POSTGRES_DB` | Must be **`dvdrental`** for this dataset |
-
-MCP (streamable HTTP) variables (used when running the MCP server):
-
-| Variable | Purpose |
-| --- | --- |
-| `MCP_HOST` | Host/interface to bind (e.g. `127.0.0.1` locally, `0.0.0.0` in Docker) |
-| `MCP_PORT` | Port to bind (default in this repo: `8000`) |
-| `MCP_SERVER_URL` | Full client URL (e.g. `http://127.0.0.1:8000/mcp`) |
-
----
-
-## 4. Run the end-to-end demo (bootstrap + MCP tools)
-
-This repo’s `main.py` runs:
-
-- a **bootstrap** check (read-only DB connection + a trivial `SELECT`)
-- then a small **MCP demo** that calls the running MCP server over streamable HTTP
-
-Prereq: `docker compose up -d` (brings up Postgres + `mcp-server`).
+`docker compose up -d` brings up **three** services: `postgres` (DVD Rental on **5432**), `postgres-app-memory` (app state on **5433**), and `mcp-server` (MCP tools on **8000**).
 
 ```bash
-uv run python main.py
+docker compose up -d
 ```
 
-Expect exit code **0** and output that includes:
+Wait until the Postgres containers report healthy:
 
-- `bootstrap_ok database=dvdrental ...`
-- `MCP endpoint: http://127.0.0.1:8000/mcp`
-- tool names including `inspect_schema` and `execute_readonly_sql`
+```bash
+docker ps --filter name=multiagent
+```
 
-The MCP server exposes streamable HTTP on **`/mcp`** (default `http://127.0.0.1:8000/mcp`).
+### 3. Configure environment
+
+```bash
+cp -n .env.example .env
+# Edit .env if your host/port/credentials differ from the Compose defaults
+```
+
+### 4. Run
+
+```bash
+# Interactive REPL
+uv run python main.py
+
+# One-shot question, then drop into REPL
+uv run python main.py -q "Show me the top 5 most rented films"
+
+# Single non-interactive question via stdin
+echo "How many customers are there?" | uv run python main.py
+
+# Skip the Postgres connectivity check
+uv run python main.py --no-bootstrap
+```
+
+On first run (no schema docs persisted yet) the system automatically goes through the **Schema Pipeline**: it inspects the database, drafts descriptions with the LLM, then pauses for your approval before writing anything. After you approve, subsequent runs go straight to the **Query Pipeline**.
 
 ---
 
-## 5. Tests
+## Environment variables
 
-| Command | What it does |
+| Variable | Purpose |
 | --- | --- |
-| `uv run pytest tests/ -q` | All tests. Integration tests **skip** if Postgres is not reachable. |
-| `uv run pytest tests/test_bootstrap_smoke.py -q` | Bootstrap tests only |
-| `uv run pytest -m integration -q` | Only tests marked `@pytest.mark.integration` (needs Postgres + valid `.env`) |
+| `POSTGRES_HOST` | DVD Rental DB host (e.g. `localhost`) |
+| `POSTGRES_PORT` | DVD Rental DB port (`5432` in Compose) |
+| `POSTGRES_USER` | DB user (`postgres` in Compose) |
+| `POSTGRES_PASSWORD` | DB password |
+| `POSTGRES_DB` | Must be **`dvdrental`** |
+| `APP_MEMORY_HOST` | App memory DB host (e.g. `localhost`) |
+| `APP_MEMORY_PORT` | App memory DB port (`5433` in Compose) |
+| `APP_MEMORY_USER` / `APP_MEMORY_PASSWORD` / `APP_MEMORY_DB` | Credentials and database name **`app_memory`** |
+| `MCP_HOST` | MCP server bind host (client-side; container uses `0.0.0.0`) |
+| `MCP_PORT` | MCP server port (default `8000`) |
+| `MCP_SERVER_URL` | Full MCP client URL (e.g. `http://127.0.0.1:8000/mcp`) |
+| `LLM_SERVICE_URL` | LiteLLM proxy root URL |
+| `LLM_API_KEY` | API key for the LiteLLM proxy |
+| `LLM_MODEL` | Model id as routed by LiteLLM |
+| `QUERY_MAX_REFINEMENTS` | Max critic → SQL retries (default `3`) |
+| `DEFAULT_USER_ID` / `DEFAULT_THREAD_ID` | Memory + LangGraph thread defaults |
+| `GRAPH_DEBUG` | Set `true` for extra graph logging |
 
-`tests/conftest.py` loads **`.env`** from the repo root (via pytest’s `config.rootpath`) so `Settings()` can be built for unit and integration tests (`override=False` preserves env vars already set in the shell).
-
-MCP-specific tests live alongside the rest:
-
-- `tests/test_mcp_streamable_http_client.py`: starts an in-process streamable HTTP server and asserts the tool list includes `inspect_schema` and `execute_readonly_sql`
-- `tests/test_mcp_readonly_unit.py`: read-only SQL validator unit tests (no DB)
-- `tests/test_mcp_db_integration.py`: integration tests against live `dvdrental`
+See [`.env.example`](.env.example) for all defaults.
 
 ---
 
-## 6. Lint and format
+## Project layout
+
+```text
+.
+├── main.py                      # CLI: Postgres bootstrap + LangGraph REPL / HITL resume
+├── pyproject.toml               # uv / hatch packages under src/*, Ruff, pytest markers
+├── uv.lock
+├── docker-compose.yml           # postgres (dvdrental), postgres-app-memory, mcp-server
+├── Dockerfile                   # Image for mcp-server
+├── TASK.md / AGENTS.md          # Assignment + repo agent rules
+├── data/
+│   └── schema_catalog.json      # Optional exported schema catalog (artifact)
+├── db/
+│   ├── dvdrental.tar            # DVD Rental dataset archive
+│   └── restore-dvdrental.sh     # Init script mounted into the dvdrental container
+├── specs/                       # Incremental design notes (spec-driven)
+├── src/
+│   ├── agents/
+│   │   ├── query_agent.py       # Structured LLM: plan + SQL (QueryPlanOutput, SqlGenerationOutput)
+│   │   ├── schema_agent.py      # Structured LLM: SchemaDraftOutput
+│   │   ├── prompts/             # Prompt strings (query, schema)
+│   │   └── schemas/             # Pydantic output models
+│   ├── config/                  # pydantic-settings: postgres, app memory, MCP, LLM
+│   ├── graph/
+│   │   ├── graph.py             # StateGraph wiring, MemorySaver, graph_run_config()
+│   │   ├── state.py             # GraphState
+│   │   ├── presence.py          # DbSchemaPresence — gate on schema_docs
+│   │   ├── schema_pipeline.py   # schema_inspect … schema_persist
+│   │   ├── query_pipeline.py    # query_load_context … query_refine_cap
+│   │   ├── memory_nodes.py      # memory_load_user, memory_update_session
+│   │   └── mcp_helpers.py       # MultiServerMCPClient + tool result helpers
+│   ├── llm/
+│   │   └── factory.py           # create_chat_llm() → ChatLiteLLM (LiteLLM-compatible API)
+│   ├── memory/
+│   │   ├── db.py                # Connect to app_memory database
+│   │   ├── schema_docs.py       # Persisted approved schema descriptions
+│   │   ├── preferences.py       # User preferences store
+│   │   └── session.py           # Session snapshot helpers
+│   ├── mcp_server/
+│   │   ├── main.py              # FastMCP Streamable HTTP entry
+│   │   ├── tools.py             # inspect_schema, execute_readonly_sql
+│   │   ├── readonly_sql.py      # Read-only SQL guard
+│   │   └── schema_metadata.py   # information_schema introspection
+│   └── utils/
+│       └── postgres.py          # Shared psycopg helpers
+└── tests/                       # pytest (unit + integration markers)
+```
+
+First-party imports use top-level package names from `src/` (`config`, `graph`, `agents`, …) as configured in `pyproject.toml`.
+
+---
+
+## How it works
+
+### Schema gate
+
+Every run starts with `DbSchemaPresence.check()`, which queries `app_memory.schema_docs` for an approved schema document.
+
+- **Not ready → Schema Pipeline**: the graph inspects the live DB via MCP (`inspect_schema`), asks the LLM to draft human-readable table/column descriptions, then **pauses with `interrupt()`** for your approval. Once you type `approve` (or paste an edited JSON), the approved docs are persisted and the graph ends.
+- **Ready → Query Pipeline**: approved docs are loaded from memory and used as context for every LLM call.
+
+### Query Pipeline
+
+1. **`memory_load_user`** — loads user preferences and approved schema docs from the **`app_memory`** Postgres database into state.
+2. **`query_load_context`** — seeds query-specific state fields.
+3. **`query_plan`** — LLM produces a structured query plan (tables, joins, filters needed).
+4. **`query_generate_sql`** — LLM generates the SQL (informed by plan + schema docs + optional critic feedback).
+5. **`query_critic`** — validates SQL: must be read-only and include a `LIMIT`; rejects otherwise.
+6. **Retry loop** — up to `QUERY_MAX_REFINEMENTS` (default 3) rejections feed critic feedback back to `query_generate_sql`.
+7. **`query_execute`** — sends accepted SQL to the MCP `execute_readonly_sql` tool.
+8. **`query_explain`** — formats the result (columns, rows, explanation).
+9. **`memory_update_session`** — snapshots session fields and persists any dirty user preferences.
+
+### Safety
+
+- Only `SELECT` statements with a `LIMIT` clause reach the database.
+- The MCP server's `execute_readonly_sql` independently rejects any statement containing write/admin tokens (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, …).
+- Schema docs are **never written without human approval** (HITL `interrupt()`).
+
+---
+
+## Tests
+
+```bash
+# Full suite (integration tests skip if Postgres is unreachable)
+uv run pytest tests/ -q
+
+# Integration tests only (needs live dvdrental)
+uv run pytest -m integration -q
+```
+
+---
+
+## Lint and format
 
 ```bash
 uv run ruff check .
 uv run ruff format .
 ```
 
-Fix issues before merging; see [AGENTS.md](AGENTS.md) for project expectations.
-
 ---
 
-## 7. Git hooks (optional)
+## Adding dependencies
 
-Pre-commit is configured for Ruff and small hygiene checks:
-
-```bash
-uv run pre-commit install
-```
-
----
-
-## 8. Project layout (high level)
-
-```text
-main.py                      # CLI entry (logging + bootstrap)
-src/config/
-  settings.py                # pydantic-settings (package `config`)
-src/db_multiagent_system/
-  bootstrap.py               # connect + read-only SELECT
-  mcp_demo.py                # demo client for MCP server/tools
-src/mcp_server/
-  main.py                    # MCP server entrypoint (streamable HTTP)
-  readonly_sql.py            # read-only SQL validation + safety checks
-  schema_metadata.py         # schema introspection helpers
-  tools.py                   # MCP tool registration (inspect_schema, execute_readonly_sql)
-src/utils/                   # small shared helpers
-tests/
-  conftest.py                # load .env for tests
-  test_bootstrap_smoke.py
-db/                          # dvdrental.tar + restore script
-docker-compose.yml
-Dockerfile                   # container image for MCP server
-specs/                       # feature specs (e.g. 01-bootstrap)
-```
-
----
-
-## 9. Adding dependencies
-
-Use **uv** only—do not edit dependency tables by hand:
+Use **uv** — do not edit `pyproject.toml` by hand:
 
 ```bash
 uv add <package>
 uv add --dev <package>
 ```
-
-See [AGENTS.md](AGENTS.md).
