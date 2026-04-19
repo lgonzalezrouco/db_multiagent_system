@@ -100,15 +100,18 @@ def schema_resume_from_inputs(
     """
     if mode == "approve":
         tables = (draft or {}).get("tables") if isinstance(draft, dict) else None
-        if isinstance(tables, list):
-            return {"tables": tables}, None
-        return {"tables": []}, None
+        if not isinstance(tables, list) or not tables:
+            return None, 'Draft must contain a non-empty "tables" list.'
+        return {"tables": tables}, None
     try:
         result = json.loads(edited_json)
     except json.JSONDecodeError as e:
         return None, f"Invalid JSON: {e}"
     if not isinstance(result, dict) or "tables" not in result:
         return None, 'JSON must contain a "tables" key.'
+    tables = result.get("tables")
+    if not isinstance(tables, list) or not tables:
+        return None, 'JSON "tables" must be a non-empty list.'
     return result, None
 
 
