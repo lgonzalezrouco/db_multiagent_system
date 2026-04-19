@@ -1,4 +1,4 @@
-"""Structured schema documentation draft for HITL (Spec 05)."""
+"""Structured schema documentation draft for HITL"""
 
 from __future__ import annotations
 

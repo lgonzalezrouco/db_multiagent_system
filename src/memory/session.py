@@ -7,10 +7,6 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from graph.state import GraphState
 
-# ---------------------------------------------------------------------------
-# Constants (Spec 11 §11)
-# ---------------------------------------------------------------------------
-
 HISTORY_MAX_TURNS: int = 5
 HISTORY_ROWS_PREVIEW: int = 3
 HISTORY_ROW_VALUE_MAX_CHARS: int = 200
