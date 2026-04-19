@@ -283,7 +283,9 @@ async def main() -> None:
                 reject = st.button("Reject (no change)", key="prefs_hitl_reject")
 
             if approve or reject:
-                resume_delta = edited if approve else None
+                # Rejection uses the "reject" sentinel string (not None/{}
+                # which LangGraph may misinterpret as an interrupt-id map).
+                resume_delta = edited if approve else "reject"
                 _run_tree = prefs_hitl.get("run_tree")
                 try:
                     state = await _consume_resume(

@@ -203,7 +203,7 @@ def test_preferences_hitl_approved_delta_stored_in_state(
 def test_preferences_hitl_none_resume_clears_delta(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When user rejects (resumes with None), delta is cleared."""
+    """When interrupt returns None (non-dict), delta is cleared."""
     monkeypatch.setattr(_hitl_mod, "interrupt", lambda _: None)
     state = _state(proposed_delta={"output_format": "json"})
     result = preferences_hitl(state)
@@ -214,8 +214,19 @@ def test_preferences_hitl_none_resume_clears_delta(
 def test_preferences_hitl_empty_dict_resume_clears_delta(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """When user resumes with {}, it is treated as rejection."""
+    """When interrupt returns {}, it is treated as rejection."""
     monkeypatch.setattr(_hitl_mod, "interrupt", lambda _: {})
+    state = _state(proposed_delta={"output_format": "json"})
+    result = preferences_hitl(state)
+
+    assert result["memory"]["preferences_proposed_delta"] is None
+
+
+def test_preferences_hitl_reject_string_clears_delta(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """When interrupt returns 'reject' sentinel string, delta is cleared."""
+    monkeypatch.setattr(_hitl_mod, "interrupt", lambda _: "reject")
     state = _state(proposed_delta={"output_format": "json"})
     result = preferences_hitl(state)
 

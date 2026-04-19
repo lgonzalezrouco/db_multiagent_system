@@ -2,9 +2,9 @@
 
 A **natural-language query system** over PostgreSQL built with **LangGraph**, two agents (Schema + Query), an MCP tool server, and persistent memory — evaluated on the **DVD Rental** dataset.
 
-| Doc | Role |
-| --- | --- |
-| [TASK.md](TASK.md) | Full assignment: agents, memory, MCP, deliverables, rubric |
+| Doc                    | Role                                                             |
+| ---------------------- | ---------------------------------------------------------------- |
+| [TASK.md](TASK.md)     | Full assignment: agents, memory, MCP, deliverables, rubric       |
 | [AGENTS.md](AGENTS.md) | Repo workflow: `uv`, safety rules, Git conventions, verification |
 
 ---
@@ -113,25 +113,25 @@ Use the same `.env` / Docker setup as above. Optional: set **`DEFAULT_THREAD_ID`
 
 ## Environment variables
 
-| Variable | Purpose |
-| --- | --- |
-| `POSTGRES_HOST` | DVD Rental DB host (e.g. `localhost`) |
-| `POSTGRES_PORT` | DVD Rental DB port (`5432` in Compose) |
-| `POSTGRES_USER` | DB user (`postgres` in Compose) |
-| `POSTGRES_PASSWORD` | DB password |
-| `POSTGRES_DB` | Must be **`dvdrental`** |
-| `APP_MEMORY_HOST` | App memory DB host (e.g. `localhost`) |
-| `APP_MEMORY_PORT` | App memory DB port (`5433` in Compose) |
-| `APP_MEMORY_USER` / `APP_MEMORY_PASSWORD` / `APP_MEMORY_DB` | Credentials and database name **`app_memory`** |
-| `MCP_HOST` | MCP server bind host (client-side; container uses `0.0.0.0`) |
-| `MCP_PORT` | MCP server port (default `8000`) |
-| `MCP_SERVER_URL` | Full MCP client URL (e.g. `http://127.0.0.1:8000/mcp`) |
-| `LLM_SERVICE_URL` | LiteLLM proxy root URL |
-| `LLM_API_KEY` | API key for the LiteLLM proxy |
-| `LLM_MODEL` | Model id as routed by LiteLLM |
-| `QUERY_MAX_REFINEMENTS` | Max critic → SQL retries (default `3`) |
-| `DEFAULT_USER_ID` / `DEFAULT_THREAD_ID` | Memory + LangGraph thread defaults |
-| `LANGSMITH_*` | Optional tracing to LangSmith ([Observability](#observability-langsmith) below) |
+| Variable                                                    | Purpose                                                                         |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------- |
+| `POSTGRES_HOST`                                             | DVD Rental DB host (e.g. `localhost`)                                           |
+| `POSTGRES_PORT`                                             | DVD Rental DB port (`5432` in Compose)                                          |
+| `POSTGRES_USER`                                             | DB user (`postgres` in Compose)                                                 |
+| `POSTGRES_PASSWORD`                                         | DB password                                                                     |
+| `POSTGRES_DB`                                               | Must be **`dvdrental`**                                                         |
+| `APP_MEMORY_HOST`                                           | App memory DB host (e.g. `localhost`)                                           |
+| `APP_MEMORY_PORT`                                           | App memory DB port (`5433` in Compose)                                          |
+| `APP_MEMORY_USER` / `APP_MEMORY_PASSWORD` / `APP_MEMORY_DB` | Credentials and database name **`app_memory`**                                  |
+| `MCP_HOST`                                                  | MCP server bind host (client-side; container uses `0.0.0.0`)                    |
+| `MCP_PORT`                                                  | MCP server port (default `8000`)                                                |
+| `MCP_SERVER_URL`                                            | Full MCP client URL (e.g. `http://127.0.0.1:8000/mcp`)                          |
+| `LLM_SERVICE_URL`                                           | LiteLLM proxy root URL                                                          |
+| `LLM_API_KEY`                                               | API key for the LiteLLM proxy                                                   |
+| `LLM_MODEL`                                                 | Model id as routed by LiteLLM                                                   |
+| `QUERY_MAX_REFINEMENTS`                                     | Max critic → SQL retries (default `3`)                                          |
+| `DEFAULT_USER_ID` / `DEFAULT_THREAD_ID`                     | Memory + LangGraph thread defaults                                              |
+| `LANGSMITH_*`                                               | Optional tracing to LangSmith ([Observability](#observability-langsmith) below) |
 
 See [`.env.example`](.env.example) for all defaults.
 
@@ -225,19 +225,64 @@ Every run starts with `DbSchemaPresence.check()`, which queries `app_memory.sche
 
 1. **`memory_load_user`** — loads user preferences and approved schema docs from the **`app_memory`** Postgres database into state.
 2. **`query_load_context`** — seeds query-specific state fields.
-3. **`query_plan`** — LLM produces a structured query plan (tables, joins, filters needed).
-4. **`query_generate_sql`** — LLM generates the SQL (informed by plan + schema docs + optional critic feedback).
-5. **`query_critic`** — validates SQL: must be read-only and include a `LIMIT`; rejects otherwise.
-6. **Retry loop** — up to `QUERY_MAX_REFINEMENTS` (default 3) rejections feed critic feedback back to `query_generate_sql`.
-7. **`query_execute`** — sends accepted SQL to the MCP `execute_readonly_sql` tool.
-8. **`query_explain`** — formats the result (columns, rows, explanation).
-9. **`memory_update_session`** — snapshots session fields and persists any dirty user preferences.
+3. **`preferences_infer`** — calls the LLM to detect if the user's message signals a persistent preference change; proposes a delta or no-op.
+4. **`preferences_hitl`** _(conditional)_ — if a delta was proposed, pauses with `interrupt()` for human review. Resume with the approved delta or `"reject"`.
+5. **`preferences_persist`** _(conditional)_ — if the delta was approved, patches `user_preferences` via JSONB merge and updates in-state prefs.
+6. **`query_plan`** — LLM produces a structured query plan (tables, joins, filters needed).
+7. **`query_generate_sql`** — LLM generates the SQL (informed by plan + schema docs + optional critic feedback).
+8. **`query_enforce_limit`** — uses **sqlglot** to inject or tighten the SQL `LIMIT` to the user's `row_limit_hint` preference.
+9. **`query_critic`** — validates SQL (read-only, LIMIT present) and runs a semantic LLM critique; `safety_strictness` controls the threshold.
+10. **Retry loop** — up to `QUERY_MAX_REFINEMENTS` (default 3) rejections feed critic feedback back to `query_generate_sql`.
+11. **`query_execute`** — sends accepted SQL to the MCP `execute_readonly_sql` tool.
+12. **`query_explain`** — formats the result applying `output_format`, `date_format`, and `preferred_language` preferences.
+13. **`memory_update_session`** — snapshots conversation history and persists any dirty user preferences.
 
 ### Safety
 
 - Only `SELECT` statements with a `LIMIT` clause reach the database.
 - The MCP server's `execute_readonly_sql` independently rejects any statement containing write/admin tokens (`INSERT`, `UPDATE`, `DELETE`, `DROP`, `ALTER`, `CREATE`, …).
 - Schema docs are **never written without human approval** (HITL `interrupt()`).
+
+---
+
+## Memory
+
+The system implements **two distinct memory layers**, each with a different scope and backend.
+
+### Persistent memory — cross-session, per-user
+
+**Backend:** PostgreSQL `app_memory` database (port 5433), managed by `src/memory/preferences.py` and `src/memory/schema_docs.py`.
+
+| Table              | Key                 | What is stored                                          | Why                                                                                                                                |
+| ------------------ | ------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `user_preferences` | `user_id` (TEXT PK) | JSONB blob of preference keys                           | User preferences must survive process restarts and be applied on every subsequent query without the user having to re-specify them |
+| `schema_docs`      | Singleton (`id=1`)  | JSONB: approved table/column descriptions + fingerprint | Schema documentation is expensive to generate (LLM + HITL) and stable; it is shared across all users and sessions                  |
+
+**User preference keys** and how each shapes system behaviour:
+
+| Key                  | Default     | Effect                                                                                                                                                                                                              |
+| -------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `preferred_language` | `"en"`      | `query_explain` instructs the LLM to write the explanation in this language                                                                                                                                         |
+| `output_format`      | `"table"`   | `query_explain` sets `last_result["output_format"]`; formatters branch between a markdown pipe table (`"table"`) and a fenced JSON block (`"json"`)                                                                 |
+| `date_format`        | `"ISO8601"` | `query_explain` reformats date/timestamp values in result rows before returning (`"US"` → MM/DD/YYYY, `"EU"` → DD/MM/YYYY)                                                                                          |
+| `safety_strictness`  | `"strict"`  | `query_critic` applies different thresholds: `strict` blocks on any critic risk even with an `accept` verdict; `normal` blocks only on explicit `reject`; `lenient` always passes through with a warning annotation |
+| `row_limit_hint`     | `10`        | `query_enforce_limit` uses sqlglot to inject or tighten the SQL `LIMIT` clause before the critic sees the SQL (clamped 1–500)                                                                                       |
+
+**How preferences change:** the `preferences_infer` node calls the LLM on every query turn to detect persistent preference-change intent in the user's message. If a delta is proposed, `preferences_hitl` pauses the graph with an `interrupt()` for human review. On approval, `preferences_persist` calls `UserPreferencesStore.patch()` — a JSONB `||` merge that updates only the approved keys without wiping others. On rejection (resume with `"reject"`), the proposal is discarded and the query continues with the existing preferences.
+
+### Short-term memory — session-scoped, in-process
+
+**Backend:** LangGraph `MemorySaver` checkpointer (in-process, keyed by `thread_id`). Lost on process restart — intentional, since this is conversational context not durable state.
+
+| Field                               | Location in state     | What is stored                                                                                                                               | Why                                                                                                                                                        |
+| ----------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `memory.conversation_history`       | `MemoryState`         | List of up to 5 `ConversationTurn` objects: user question, SQL, row count, row preview (≤3 rows, values truncated to 200 chars), explanation | Enables the LLM to resolve pronoun references ("his movies", "those actors") and reuse joins/filters from prior turns without re-reading state from the DB |
+| `memory.preferences`                | `MemoryState`         | Mirror of the current user's persisted preferences, loaded fresh at the start of every turn                                                  | Avoids repeated DB reads within a turn; all pipeline nodes read from state rather than querying `app_memory` directly                                      |
+| `memory.preferences_proposed_delta` | `MemoryState`         | Candidate preference update proposed by the inference LLM                                                                                    | Carries the delta from `preferences_infer` through `preferences_hitl` to `preferences_persist` within a single turn                                        |
+| `query.*`                           | `QueryPipelineState`  | Plan, generated SQL, critic status, execution result, explanation                                                                            | Pipeline nodes write and read intermediate results; cleared at the start of each new query turn                                                            |
+| `schema_pipeline.*`                 | `SchemaPipelineState` | Metadata, draft, HITL-approved doc                                                                                                           | Schema pipeline nodes write and read intermediate results                                                                                                  |
+
+**Conversation history cap** is enforced in `src/memory/session.py`: `HISTORY_MAX_TURNS = 5`, `HISTORY_ROWS_PREVIEW = 3`, `HISTORY_ROW_VALUE_MAX_CHARS = 200`. The cap prevents unbounded token growth in LLM prompts while retaining enough recent context for multi-turn refinement.
 
 ---
 

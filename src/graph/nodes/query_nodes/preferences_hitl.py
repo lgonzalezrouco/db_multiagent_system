@@ -24,10 +24,14 @@ def preferences_hitl(state: GraphState) -> dict[str, Any]:
             "rationale": "..."         # LLM explanation
         }
 
-    The resume value is the *approved* delta dict (possibly modified by the user),
-    or ``None`` / ``{}`` to reject without persisting anything.
+    The resume value must be either:
+    - A non-empty dict of preference keys to apply (approval, possibly edited).
+    - The string ``"reject"`` to discard the proposal without persisting.
 
-    On resume the approved delta is stored in
+    ``None`` and empty dict are NOT valid resume values for LangGraph's
+    ``interrupt()`` — use ``"reject"`` for explicit rejection.
+
+    On resume the approved delta (or None) is stored in
     ``state.memory.preferences_proposed_delta`` so ``preferences_persist`` can
     read it.  The rationale is cleared.
     """
@@ -37,11 +41,16 @@ def preferences_hitl(state: GraphState) -> dict[str, Any]:
         "proposed_delta": state.memory.preferences_proposed_delta or {},
         "rationale": state.memory.preferences_rationale or "",
     }
-    approved_delta = interrupt(hitl_payload)
+    resume_value = interrupt(hitl_payload)
 
-    # Normalise: None or empty dict both mean "reject"
-    if not approved_delta:
+    # Normalise resume value: "reject" string or non-dict → treat as rejection.
+    if resume_value == "reject" or not isinstance(resume_value, dict):
         approved_delta = None
+    elif not resume_value:
+        # Empty dict: also treated as rejection
+        approved_delta = None
+    else:
+        approved_delta = resume_value
 
     return {
         "steps": ["preferences_hitl"],

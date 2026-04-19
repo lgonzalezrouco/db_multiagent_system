@@ -16,7 +16,7 @@ class PreferencesInferenceOutput(BaseModel):
     """
 
     proposed_delta: dict[str, Any] | None = Field(
-        default=None,
+        ...,
         description=(
             "Subset of user-preference keys to update, or null if no change "
             "is needed.  Only include keys where the user expressed clear "
