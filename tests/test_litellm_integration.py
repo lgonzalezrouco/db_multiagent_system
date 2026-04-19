@@ -16,6 +16,20 @@ async def test_live_litellm_sql_generation_skips_by_default() -> None:
             "Set LLM_INTEGRATION=1 and LLM_SERVICE_URL / LLM_MODEL for live test",
         )
 
+    required_env_vars = ("LLM_SERVICE_URL", "LLM_MODEL")
+    missing_env_vars = [
+        name for name in required_env_vars if not os.environ.get(name, "").strip()
+    ]
+    if missing_env_vars:
+        pytest.skip(
+            "Live LiteLLM test requires non-empty environment variables: "
+            + ", ".join(missing_env_vars),
+        )
+
+    if "LLM_API_KEY" in os.environ and not os.environ.get("LLM_API_KEY", "").strip():
+        pytest.skip(
+            "Live LiteLLM test requires LLM_API_KEY to be non-empty when set.",
+        )
     from langchain_core.messages import HumanMessage, SystemMessage
 
     from agents.schemas.query_outputs import SqlGenerationOutput
