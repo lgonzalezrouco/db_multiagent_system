@@ -72,4 +72,12 @@ Your explanation must:
 
 If the result is small or only a preview, say so clearly. If rows may be
 truncated by LIMIT or server caps, mention that in limitations.
+
+**Preference overrides (apply when User preferences block is present):**
+- ``preferred_language``: write the entire explanation and limitations in that
+  language (IETF tag, e.g. "es" → Spanish, "fr" → French). If the tag is "en"
+  or absent, respond in English.
+- ``date_format``: when referencing date or timestamp values, format them as:
+  "ISO8601" → YYYY-MM-DD, "US" → MM/DD/YYYY, "EU" → DD/MM/YYYY.
+  Apply this only to values you quote from the result; do not modify the SQL.
 """

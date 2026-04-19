@@ -1,12 +1,76 @@
 from __future__ import annotations
 
 import logging
+import re
+from datetime import date, datetime
 from typing import Any
 
 from agents.query_agent import build_query_explanation
 from graph.state import GraphState
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Date formatting helpers
+# ---------------------------------------------------------------------------
+
+_DATE_FMT_MAP = {
+    "ISO8601": "%Y-%m-%d",
+    "US": "%m/%d/%Y",
+    "EU": "%d/%m/%Y",
+}
+
+
+def _format_date_value(value: Any, fmt_str: str) -> Any:
+    """Format a date/datetime value according to *fmt_str*.
+
+    Leaves non-date values unchanged. Handles ``datetime.date``,
+    ``datetime.datetime``, and ISO8601 string values that look like dates.
+    """
+    if isinstance(value, datetime):
+        return value.strftime(fmt_str)
+    if isinstance(value, date):
+        return value.strftime(fmt_str)
+    if isinstance(value, str):
+        # Try to parse common ISO date/datetime strings (YYYY-MM-DD or
+        # YYYY-MM-DDTHH:MM:SS) and reformat them.
+        for pattern, parser in (
+            (r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}", "%Y-%m-%dT%H:%M:%S"),
+            (r"^\d{4}-\d{2}-\d{2}$", "%Y-%m-%d"),
+        ):
+            if re.match(pattern, value):
+                try:
+                    return datetime.strptime(value[:19], parser).strftime(fmt_str)
+                except ValueError:
+                    pass
+    return value
+
+
+def _apply_date_format(
+    rows: list[dict[str, Any]],
+    date_format: str,
+) -> list[dict[str, Any]]:
+    """Return a new list of rows with date values reformatted."""
+    fmt_str = _DATE_FMT_MAP.get(date_format)
+    if not fmt_str or date_format == "ISO8601":
+        return rows  # ISO8601 is the DB native — no conversion needed
+    return [{k: _format_date_value(v, fmt_str) for k, v in row.items()} for row in rows]
+
+
+# ---------------------------------------------------------------------------
+# Preference helpers
+# ---------------------------------------------------------------------------
+
+
+def _get_pref(prefs: Any, key: str, default: str) -> str:
+    if not isinstance(prefs, dict):
+        return default
+    return str(prefs.get(key) or default).strip() or default
+
+
+# ---------------------------------------------------------------------------
+# Existing helpers
+# ---------------------------------------------------------------------------
 
 
 def _rows_to_dicts(columns: list[str], rows: list[Any]) -> list[dict[str, Any]]:
@@ -36,6 +100,11 @@ def _fallback_explanation(
         f"Answer for: {preview_in[:120]!r}. "
         f"Returned {payload.get('rows_returned', len(rows_out))} row(s)."
     )
+
+
+# ---------------------------------------------------------------------------
+# Node
+# ---------------------------------------------------------------------------
 
 
 async def query_explain(state: GraphState) -> dict[str, Any]:
@@ -69,11 +138,18 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
     rows_raw = payload.get("rows") or []
     rows_out = _rows_to_dicts(columns, rows_raw)
 
+    # --- Preference values ---
+    prefs = state.memory.preferences
+    output_format = _get_pref(prefs, "output_format", "table")
+    date_format = _get_pref(prefs, "date_format", "ISO8601")
+
+    # Apply date formatting to rows (deterministic, before LLM or JSON output)
+    rows_formatted = _apply_date_format(rows_out, date_format)
+
     warn = state.query.docs_warning
     limitations = _default_limitations(warn)
-    expl = _fallback_explanation(state.user_input or "", payload, rows_out)
+    expl = _fallback_explanation(state.user_input or "", payload, rows_formatted)
 
-    prefs = state.memory.preferences
     qp = state.query.plan if isinstance(state.query.plan, dict) else None
 
     try:
@@ -103,9 +179,10 @@ async def query_explain(state: GraphState) -> dict[str, Any]:
 
     last_result: dict[str, Any] = {
         "kind": "query_answer",
+        "output_format": output_format,  # forwarded so UI can branch rendering
         "sql": sql,
         "columns": columns,
-        "rows": rows_out,
+        "rows": rows_formatted,
         "explanation": expl,
         "limitations": limitations,
     }

@@ -1,4 +1,4 @@
-"""Streamlit entry: session state, chat, schema HITL (same graph + config as CLI)."""
+"""Streamlit entry: session state, chat, schema HITL, preferences HITL."""
 
 from __future__ import annotations
 
@@ -23,6 +23,19 @@ from ui.formatters import (
 )
 
 _PENDING_GRAPH_INPUT = "_pending_graph_input"
+
+# Session-state keys for each HITL type
+_SCHEMA_HITL_KEY = "_schema_hitl"
+_PREFS_HITL_KEY = "_prefs_hitl"
+
+# Canonical preference keys + human-readable labels
+_PREF_LABELS: dict[str, str] = {
+    "preferred_language": "Preferred language (IETF tag, e.g. en, es, fr)",
+    "output_format": "Output format (table | json)",
+    "date_format": "Date format (ISO8601 | US | EU)",
+    "safety_strictness": "Safety strictness (strict | normal | lenient)",
+    "row_limit_hint": "Row limit hint (1–500)",
+}
 
 
 def _graph_app() -> Any:
@@ -60,7 +73,7 @@ async def _run_until_interrupt_or_done(
     initial: dict[str, Any],
     config: RunnableConfig,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
-    """Run ``ainvoke`` until completion or first ``schema_review`` interrupt."""
+    """Run ``ainvoke`` until completion or first known HITL interrupt."""
     async with ls_trace(
         "agent_turn",
         run_type="chain",
@@ -81,7 +94,8 @@ async def _run_until_interrupt_or_done(
             msg = f"unexpected interrupt payload: {type(payload).__name__}"
             _close_run(run_tree, error=msg)
             raise TypeError(msg)
-        if payload.get("kind") != "schema_review":
+        kind = payload.get("kind")
+        if kind not in {"schema_review", "preferences_review"}:
             msg = f"unhandled interrupt: {payload!r}"
             _close_run(run_tree, error=msg)
             raise RuntimeError(msg)
@@ -107,7 +121,8 @@ async def _consume_resume(
     while True:
         state, interrupts = unwrap_graph_v2(out)
         if not interrupts:
-            st.session_state.pop("_schema_hitl", None)
+            st.session_state.pop(_SCHEMA_HITL_KEY, None)
+            st.session_state.pop(_PREFS_HITL_KEY, None)
             _close_run(run_tree, outputs={"steps": state.steps})
             return state
         intr = interrupts[0]
@@ -115,15 +130,23 @@ async def _consume_resume(
         if not isinstance(payload, dict):
             msg = f"unexpected interrupt payload: {type(payload).__name__}"
             raise TypeError(msg)
-        if payload.get("kind") != "schema_review":
-            raise RuntimeError(f"unhandled interrupt: {payload!r}")
-        st.session_state["_schema_hitl"] = {
-            "config": config,
-            "payload": payload,
-            "run_tree": run_tree,
-        }
-        st.session_state.pop("hitl_json", None)
-        return state
+        kind = payload.get("kind")
+        if kind == "schema_review":
+            st.session_state[_SCHEMA_HITL_KEY] = {
+                "config": config,
+                "payload": payload,
+                "run_tree": run_tree,
+            }
+            st.session_state.pop("hitl_json", None)
+            return state
+        if kind == "preferences_review":
+            st.session_state[_PREFS_HITL_KEY] = {
+                "config": config,
+                "payload": payload,
+                "run_tree": run_tree,
+            }
+            return state
+        raise RuntimeError(f"unhandled interrupt: {payload!r}")
 
 
 async def _run_user_turn(app: Any, user_text: str, thread_id: str) -> dict[str, Any]:
@@ -138,8 +161,12 @@ async def _run_user_turn(app: Any, user_text: str, thread_id: str) -> dict[str, 
     }
     state, pending = await _run_until_interrupt_or_done(app, initial, config)
     if pending is not None:
-        st.session_state["_schema_hitl"] = pending
-        st.session_state.pop("hitl_json", None)
+        kind = pending.get("payload", {}).get("kind")
+        if kind == "preferences_review":
+            st.session_state[_PREFS_HITL_KEY] = pending
+        else:
+            st.session_state[_SCHEMA_HITL_KEY] = pending
+            st.session_state.pop("hitl_json", None)
     return state
 
 
@@ -165,16 +192,21 @@ async def main() -> None:
         st.session_state.pop(_PENDING_GRAPH_INPUT, None)
 
     app = _graph_app()
-    hitl = st.session_state.get("_schema_hitl")
+    schema_hitl = st.session_state.get(_SCHEMA_HITL_KEY)
+    prefs_hitl = st.session_state.get(_PREFS_HITL_KEY)
+    any_hitl = schema_hitl or prefs_hitl
 
     for role, content in st.session_state.messages:
         with st.chat_message(role):
             st.markdown(content)
 
-    if hitl:
+    # ------------------------------------------------------------------ #
+    # Schema HITL panel                                                    #
+    # ------------------------------------------------------------------ #
+    if schema_hitl:
         st.warning("Schema review required — submit a decision below to continue.")
-        payload = hitl["payload"]
-        config = hitl["config"]
+        payload = schema_hitl["payload"]
+        config = schema_hitl["config"]
         draft = payload.get("draft")
         with st.expander("Schema review (approval required)", expanded=True):
             st.json(payload)
@@ -200,12 +232,12 @@ async def main() -> None:
                     st.error(err)
                 else:
                     assert resume is not None
-                    _run_tree = hitl.get("run_tree")
+                    _run_tree = schema_hitl.get("run_tree")
                     try:
                         state = await _consume_resume(
                             app, config, resume, run_tree=_run_tree
                         )
-                        if not st.session_state.get("_schema_hitl"):
+                        if not st.session_state.get(_SCHEMA_HITL_KEY):
                             st.session_state.messages.append(
                                 ("assistant", format_turn_state(state)),
                             )
@@ -215,9 +247,64 @@ async def main() -> None:
                         _close_run(_run_tree, error=str(exc))
                         st.error(str(exc))
 
-    # Two-phase turn: append user, rerun, then await so the user bubble paints first.
+    # ------------------------------------------------------------------ #
+    # Preferences HITL panel                                               #
+    # ------------------------------------------------------------------ #
+    if prefs_hitl:
+        st.info(
+            "The assistant detected a preference change — review and approve below."
+        )
+        payload = prefs_hitl["payload"]
+        config = prefs_hitl["config"]
+        current: dict = payload.get("current") or {}
+        proposed: dict = payload.get("proposed_delta") or {}
+        rationale: str = payload.get("rationale") or ""
+
+        with st.expander("Preference change review", expanded=True):
+            if rationale:
+                st.caption(f"**Why:** {rationale}")
+
+            st.write("**Proposed changes:**")
+            for k, v in proposed.items():
+                label = _PREF_LABELS.get(k, k)
+                old = current.get(k, "_(not set)_")
+                st.write(f"- **{label}**: `{old}` → `{v}`")
+
+            st.write("**Edit before approving** (optional):")
+            edited: dict[str, Any] = {}
+            for k, v in proposed.items():
+                label = _PREF_LABELS.get(k, k)
+                edited[k] = st.text_input(label, value=str(v), key=f"prefs_edit_{k}")
+
+            col_approve, col_reject = st.columns(2)
+            with col_approve:
+                approve = st.button("Approve", type="primary", key="prefs_hitl_approve")
+            with col_reject:
+                reject = st.button("Reject (no change)", key="prefs_hitl_reject")
+
+            if approve or reject:
+                resume_delta = edited if approve else None
+                _run_tree = prefs_hitl.get("run_tree")
+                try:
+                    state = await _consume_resume(
+                        app, config, resume_delta, run_tree=_run_tree
+                    )
+                    st.session_state.pop(_PREFS_HITL_KEY, None)
+                    if not st.session_state.get(_SCHEMA_HITL_KEY):
+                        st.session_state.messages.append(
+                            ("assistant", format_turn_state(state)),
+                        )
+                    st.rerun()
+                except (RuntimeError, TypeError) as exc:
+                    if _run_tree:
+                        _close_run(_run_tree, error=str(exc))
+                    st.error(str(exc))
+
+    # ------------------------------------------------------------------ #
+    # Two-phase turn: append user, rerun, then await                      #
+    # ------------------------------------------------------------------ #
     pending_text = st.session_state.get(_PENDING_GRAPH_INPUT)
-    if pending_text is not None and not hitl:
+    if pending_text is not None and not any_hitl:
         try:
             with st.spinner("Running agents…"):
                 final_state = await _run_user_turn(
@@ -225,7 +312,9 @@ async def main() -> None:
                     pending_text,
                     st.session_state.thread_id,
                 )
-            if not st.session_state.get("_schema_hitl"):
+            if not st.session_state.get(_SCHEMA_HITL_KEY) and not st.session_state.get(
+                _PREFS_HITL_KEY
+            ):
                 st.session_state.messages.append(
                     ("assistant", format_turn_state(final_state)),
                 )
@@ -235,7 +324,7 @@ async def main() -> None:
             st.session_state.pop(_PENDING_GRAPH_INPUT, None)
         st.rerun()
 
-    prompt = None if hitl else st.chat_input("Ask about the DVD Rental database")
+    prompt = None if any_hitl else st.chat_input("Ask about the DVD Rental database")
 
     if prompt:
         st.session_state.messages.append(("user", prompt))
