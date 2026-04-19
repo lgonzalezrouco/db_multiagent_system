@@ -18,42 +18,49 @@ logger = logging.getLogger(__name__)
 
 async def memory_load_user(state: GraphState) -> dict[str, Any]:
     """Load user preferences and approved schema docs from app_memory into state."""
-    steps = list(state.get("steps", []))
-    steps.append("memory_load_user")
     settings = AppMemorySettings()
-    user_id = state.get("user_id") or settings.default_user_id
+    user_id = state.user_id or settings.default_user_id
 
     out: dict[str, Any] = {
-        "steps": steps,
+        "steps": ["memory_load_user"],
         "user_id": user_id,
-        "memory_warning": None,
-        "schema_docs_warning": None,
-        "schema_docs_context": None,
-        "preferences": None,
+        "memory": {"warning": None},
+        "query": {"docs_context": None, "docs_warning": None},
     }
+    # Preserve conversation history across the turn boundary
     out.update(seed_session_fields(state))
 
     try:
         pref_store = UserPreferencesStore(settings)
-        out["preferences"] = pref_store.get(user_id)
+        out["memory"] = {
+            **out.get("memory", {}),
+            "preferences": pref_store.get(user_id),
+        }
     except psycopg.OperationalError:
         warn = "app_memory unreachable while loading preferences"
-        out["memory_warning"] = warn
-        out["preferences"] = default_preferences()
+        out["memory"] = {
+            **out.get("memory", {}),
+            "warning": warn,
+            "preferences": default_preferences(),
+        }
         logger.warning(warn)
 
     try:
         docs_store = SchemaDocsStore(settings)
         payload = docs_store.get_payload()
         if payload is not None:
-            out["schema_docs_context"] = payload
+            out["query"] = {**out.get("query", {}), "docs_context": payload}
         else:
-            out["schema_docs_warning"] = "No approved schema docs in app_memory"
+            out["query"] = {
+                **out.get("query", {}),
+                "docs_warning": "No approved schema docs in app_memory",
+            }
     except psycopg.OperationalError:
         warn = "app_memory unreachable while loading schema docs"
-        out["schema_docs_warning"] = warn
-        if out.get("memory_warning") is None:
-            out["memory_warning"] = warn
+        out["query"] = {**out.get("query", {}), "docs_warning": warn}
+        current_memory = out.get("memory", {})
+        if current_memory.get("warning") is None:
+            out["memory"] = {**current_memory, "warning": warn}
         logger.warning(warn)
 
     return out
@@ -61,22 +68,21 @@ async def memory_load_user(state: GraphState) -> dict[str, Any]:
 
 async def memory_update_session(state: GraphState) -> dict[str, Any]:
     """Snapshot session fields and persist dirty preferences to app_memory."""
-    steps = list(state.get("steps", []))
-    steps.append("memory_update_session")
     settings = AppMemorySettings()
-    user_id = state.get("user_id") or settings.default_user_id
+    user_id = state.user_id or settings.default_user_id
 
     session_delta = snapshot_session_fields(state)
-    out: dict[str, Any] = {"steps": steps, **session_delta}
+    out: dict[str, Any] = {"steps": ["memory_update_session"], **session_delta}
 
-    if state.get("preferences_dirty"):
-        prefs = state.get("preferences") or {}
+    if state.memory.preferences_dirty:
+        prefs = state.memory.preferences or {}
         try:
             store = UserPreferencesStore(settings)
             store.upsert(user_id, prefs)
         except psycopg.OperationalError:
             warn = "could not persist preferences"
-            out["memory_warning"] = warn
+            existing = out.get("memory", {})
+            out["memory"] = {**existing, "warning": warn}
             logger.warning(warn)
 
     return out

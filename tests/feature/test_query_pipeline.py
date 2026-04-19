@@ -10,6 +10,7 @@ import pytest
 from agents.schemas.query_outputs import QueryCritiqueOutput, QueryExplanationOutput
 from graph import get_compiled_graph, graph_run_config
 from graph.nodes.query_nodes import validate_sql_for_execution
+from graph.state import GraphState
 from tests.schema_presence_stubs import ReadySchemaPresence
 
 _QUERY_SUCCESS_STEPS = [
@@ -44,6 +45,20 @@ def mcp_only_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
     monkeypatch.delenv("POSTGRES_DB", raising=False)
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
+
+
+def _unwrap_state(out: Any) -> GraphState:
+    """Extract GraphState from graph output (v1 dict or Pydantic model)."""
+    if isinstance(out, GraphState):
+        return out
+    if isinstance(out, dict):
+        return GraphState(**out)
+    value = getattr(out, "value", None)
+    if isinstance(value, GraphState):
+        return value
+    if isinstance(value, dict):
+        return GraphState(**value)
+    raise TypeError(f"unexpected output: {type(out).__name__}")
 
 
 # ---------------------------------------------------------------------------
@@ -172,19 +187,20 @@ async def test_graph_ainvoke_completes_query_pipeline_with_mocked_mcp(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: query pipeline completes successfully
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("gate_decision") == "query_path"
-    assert result.get("schema_ready") is True
-    lr = result.get("last_result")
+    state = _unwrap_state(out)
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.gate_decision == "query_path"
+    assert state.schema.ready is True
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
-    assert result.get("last_error") is None
+    assert state.last_error is None
 
 
 @pytest.mark.asyncio
@@ -218,19 +234,20 @@ async def test_graph_works_without_postgres_env_vars(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-2", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: query pipeline completes successfully
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("gate_decision") == "query_path"
-    assert result.get("schema_ready") is True
-    lr = result.get("last_result")
+    state = _unwrap_state(out)
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.gate_decision == "query_path"
+    assert state.schema.ready is True
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
-    assert result.get("last_error") is None
+    assert state.last_error is None
 
 
 @pytest.mark.asyncio
@@ -253,7 +270,7 @@ async def test_pipeline_clears_last_result_on_tool_error(
     # When: invoking with pre-existing last_result
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="shell-error-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {
             "user_input": "ping",
             "steps": [],
@@ -264,9 +281,10 @@ async def test_pipeline_clears_last_result_on_tool_error(
     )
 
     # Then: last_result is cleared and error is set
-    assert result.get("steps") == _QUERY_SUCCESS_STEPS
-    assert result.get("last_error") is not None
-    assert result.get("last_result") is None
+    state = _unwrap_state(out)
+    assert state.steps == _QUERY_SUCCESS_STEPS
+    assert state.last_error is not None
+    assert state.last_result is None
 
 
 # ---------------------------------------------------------------------------
@@ -323,13 +341,14 @@ async def test_critic_retry_then_success(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-retry-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "count actors", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: retry occurred and succeeded
-    assert result.get("steps") == [
+    state = _unwrap_state(out)
+    assert state.steps == [
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
@@ -342,8 +361,8 @@ async def test_critic_retry_then_success(
         "query_explain",
         "memory_update_session",
     ]
-    assert int(result.get("refinement_count") or 0) == 1
-    lr = result.get("last_result")
+    assert state.query.refinement_count == 1
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
     assert calls == [0, 1]
@@ -389,13 +408,14 @@ async def test_refinement_cap_prevents_infinite_retry(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-cap-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "never lands", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: cap is reached and error is reported
-    assert result.get("steps") == [
+    state = _unwrap_state(out)
+    assert state.steps == [
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
@@ -409,10 +429,8 @@ async def test_refinement_cap_prevents_infinite_retry(
         "query_refine_cap",
         "memory_update_session",
     ]
-    assert result.get("last_error") == (
-        "Critic rejected SQL after max refinement attempts."
-    )
-    assert result.get("last_result") is None
+    assert state.last_error == "Critic rejected SQL after max refinement attempts."
+    assert state.last_result is None
 
 
 @pytest.mark.asyncio
@@ -518,13 +536,14 @@ async def test_semantic_critic_rejection_triggers_retry(
         thread_id="query-semantic-retry-1",
         run_kind="pytest",
     )
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "count rentals", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: retry occurred with correct SQL
-    assert result.get("steps") == [
+    state = _unwrap_state(out)
+    assert state.steps == [
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
@@ -539,11 +558,11 @@ async def test_semantic_critic_rejection_triggers_retry(
     ]
     assert sql_calls == [0, 1]
     assert critique_calls == [0, 1]
-    assert int(result.get("refinement_count") or 0) == 1
-    lr = result.get("last_result")
+    assert state.query.refinement_count == 1
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("sql") == "SELECT COUNT(*)::bigint AS n FROM public.rental LIMIT 10"
-    assert result.get("last_error") is None
+    assert state.last_error is None
 
 
 # ---------------------------------------------------------------------------
@@ -600,15 +619,16 @@ async def test_missing_schema_docs_sets_warning(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-docs-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "smoke", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: warning is set and included in limitations
-    warn = result.get("schema_docs_warning")
+    state = _unwrap_state(out)
+    warn = state.query.docs_warning
     assert isinstance(warn, str) and warn
-    lr = result.get("last_result")
+    lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
     lim = lr.get("limitations")
@@ -653,14 +673,15 @@ async def test_mcp_error_message_propagates_to_last_error(
     # When: invoking the graph
     app = get_compiled_graph(presence=ReadySchemaPresence())
     cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1", run_kind="pytest")
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "broken query path", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: error message is in last_error
-    assert result.get("last_error") == expected_msg
-    assert result.get("last_result") is None
+    state = _unwrap_state(out)
+    assert state.last_error == expected_msg
+    assert state.last_result is None
 
 
 # ---------------------------------------------------------------------------
@@ -715,14 +736,15 @@ async def test_explain_falls_back_when_llm_fails(
         thread_id="query-explain-fallback-1",
         run_kind="pytest",
     )
-    result = await app.ainvoke(
+    out = await app.ainvoke(
         {"user_input": "show actor count", "steps": [], **state_seed},
         config=cfg,
     )
 
     # Then: fallback explanation is used
-    assert result.get("last_error") is None
-    lr = result.get("last_result")
+    state = _unwrap_state(out)
+    assert state.last_error is None
+    lr = state.last_result
     assert isinstance(lr, dict)
     explanation = lr.get("explanation")
     limitations = lr.get("limitations")

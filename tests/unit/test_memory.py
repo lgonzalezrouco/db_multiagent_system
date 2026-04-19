@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import psycopg
 import pytest
 
 from graph.memory_nodes import memory_load_user, memory_update_session
 from graph.presence import DbSchemaPresence, SchemaPresenceResult
+from graph.state import GraphState, MemoryState, QueryPipelineState
 from memory.preferences import default_preferences
 from memory.session import seed_session_fields, snapshot_session_fields
 
@@ -41,71 +40,92 @@ def test_default_preferences_returns_all_canonical_keys() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_seed_session_fields_preserves_existing_values() -> None:
-    """Existing session fields are preserved when seeding."""
-    # Given: state with existing session fields
-    state: dict[str, Any] = {
-        "previous_user_input": "hello",
-        "previous_sql": "SELECT 1",
-        "assumptions": ["a"],
-        "recent_filters": {"table": "actor"},
-    }
+def test_seed_session_fields_preserves_existing_history() -> None:
+    """Existing conversation_history is preserved when seeding."""
+    from graph.state import ConversationTurn
+
+    turn = ConversationTurn(user_input="hello", sql="SELECT 1 LIMIT 1")
+    state = GraphState(memory=MemoryState(conversation_history=[turn]))
 
     # When: seeding session fields
     delta = seed_session_fields(state)
 
-    # Then: existing values are preserved
-    assert delta["previous_user_input"] == "hello"
-    assert delta["previous_sql"] == "SELECT 1"
-    assert delta["assumptions"] == ["a"]
-    assert delta["recent_filters"] == {"table": "actor"}
+    # Then: history is preserved
+    assert "memory" in delta
+    assert len(delta["memory"]["conversation_history"]) == 1
+    assert delta["memory"]["conversation_history"][0].user_input == "hello"
 
 
-def test_seed_session_fields_returns_none_for_missing_keys() -> None:
-    """Missing session fields are initialized to None."""
-    # Given: empty state
-    state: dict[str, Any] = {}
+def test_seed_session_fields_returns_empty_list_for_no_history() -> None:
+    """Seed returns empty history when no prior turns exist."""
+    state = GraphState()
 
-    # When: seeding session fields
     delta = seed_session_fields(state)
 
-    # Then: all keys are None
-    assert delta["previous_user_input"] is None
-    assert delta["previous_sql"] is None
-    assert delta["assumptions"] is None
-    assert delta["recent_filters"] is None
+    assert "memory" in delta
+    assert delta["memory"]["conversation_history"] == []
 
 
-def test_snapshot_session_fields_extracts_from_completed_run() -> None:
-    """Session fields are extracted from completed run state."""
-    # Given: state with completed query results
-    state: dict[str, Any] = {
-        "user_input": "list films",
-        "last_result": {"sql": "SELECT * FROM film LIMIT 10", "kind": "query_answer"},
-        "assumptions": ["public schema"],
-        "recent_filters": {"limit": 10},
-    }
+def test_snapshot_session_fields_appends_turn_when_sql_executed() -> None:
+    """Snapshot appends a ConversationTurn when SQL was generated."""
+    state = GraphState(
+        user_input="list films",
+        query=QueryPipelineState(
+            generated_sql="SELECT * FROM film LIMIT 10",
+            execution_result={
+                "success": True,
+                "rows_returned": 2,
+                "rows": [{"title": "Academy Dinosaur"}, {"title": "Ace Goldfinger"}],
+                "columns": ["title"],
+            },
+            explanation="Found 2 films.",
+        ),
+    )
 
-    # When: snapshotting session fields
     delta = snapshot_session_fields(state)
 
-    # Then: values are extracted for next session
-    assert delta["previous_user_input"] == "list films"
-    assert delta["previous_sql"] == "SELECT * FROM film LIMIT 10"
-    assert delta["assumptions"] == ["public schema"]
-    assert delta["recent_filters"] == {"limit": 10}
+    assert "memory" in delta
+    history = delta["memory"]["conversation_history"]
+    assert len(history) == 1
+    assert history[0].user_input == "list films"
+    assert history[0].sql == "SELECT * FROM film LIMIT 10"
+    assert history[0].explanation == "Found 2 films."
 
 
-def test_snapshot_session_fields_handles_missing_last_result() -> None:
-    """Missing last_result results in None for previous_sql."""
-    # Given: state without last_result
-    state: dict[str, Any] = {"user_input": "q"}
+def test_snapshot_session_fields_skips_when_no_sql() -> None:
+    """Snapshot does not append a turn when no SQL was generated (schema turns)."""
+    state = GraphState(user_input="describe schema")
 
-    # When: snapshotting session fields
     delta = snapshot_session_fields(state)
 
-    # Then: previous_sql is None
-    assert delta["previous_sql"] is None
+    assert delta == {}
+
+
+def test_snapshot_caps_history_at_max_turns() -> None:
+    """Snapshot enforces the HISTORY_MAX_TURNS cap (oldest discarded)."""
+    from graph.state import ConversationTurn
+    from memory.session import HISTORY_MAX_TURNS
+
+    existing = [
+        ConversationTurn(user_input=f"q{i}", sql=f"SELECT {i} LIMIT 1")
+        for i in range(HISTORY_MAX_TURNS)
+    ]
+    state = GraphState(
+        user_input="new question",
+        memory=MemoryState(conversation_history=existing),
+        query=QueryPipelineState(
+            generated_sql="SELECT 99 LIMIT 1",
+            execution_result={"success": True, "rows_returned": 0},
+        ),
+    )
+
+    delta = snapshot_session_fields(state)
+
+    history = delta["memory"]["conversation_history"]
+    assert len(history) == HISTORY_MAX_TURNS
+    # The oldest entry should be dropped; newest is "new question"
+    assert history[-1].user_input == "new question"
+    assert history[0].user_input == "q1"  # q0 was dropped
 
 
 # ---------------------------------------------------------------------------
@@ -239,14 +259,15 @@ async def test_memory_load_user_loads_prefs_and_docs(
     )
 
     # When: loading user memory
-    result = await memory_load_user({"user_id": "alice", "steps": []})
+    state = GraphState(user_id="alice")
+    result = await memory_load_user(state)
 
     # Then: preferences and docs are loaded without warnings
     assert result["user_id"] == "alice"
-    assert result["preferences"] == {**default_preferences(), **fake_prefs}
-    assert result["schema_docs_context"] == sample_payload
-    assert result["memory_warning"] is None
-    assert result["schema_docs_warning"] is None
+    assert result["memory"]["preferences"] == {**default_preferences(), **fake_prefs}
+    assert result["query"]["docs_context"] == sample_payload
+    assert result["memory"].get("warning") is None
+    assert result["query"].get("docs_warning") is None
     assert "memory_load_user" in result["steps"]
 
 
@@ -266,12 +287,13 @@ async def test_memory_load_user_sets_warning_when_no_docs(
     )
 
     # When: loading user memory
-    result = await memory_load_user({"steps": []})
+    state = GraphState()
+    result = await memory_load_user(state)
 
     # Then: schema docs warning is set
-    assert result["schema_docs_context"] is None
-    assert result["schema_docs_warning"] is not None
-    assert result["memory_warning"] is None
+    assert result["query"].get("docs_context") is None
+    assert result["query"].get("docs_warning") is not None
+    assert result["memory"].get("warning") is None
 
 
 @pytest.mark.asyncio
@@ -287,12 +309,13 @@ async def test_memory_load_user_soft_fails_on_prefs_db_error(
     )
 
     # When: loading user memory
-    result = await memory_load_user({"steps": []})
+    state = GraphState()
+    result = await memory_load_user(state)
 
     # Then: defaults are used and warning is set
-    assert result["preferences"] == default_preferences()
-    assert result["memory_warning"] is not None
-    assert "unreachable" in result["memory_warning"]
+    assert result["memory"]["preferences"] == default_preferences()
+    assert result["memory"].get("warning") is not None
+    assert "unreachable" in result["memory"]["warning"]
 
 
 @pytest.mark.asyncio
@@ -308,12 +331,13 @@ async def test_memory_load_user_soft_fails_on_docs_db_error(
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _ErrorStore)
 
     # When: loading user memory
-    result = await memory_load_user({"steps": []})
+    state = GraphState()
+    result = await memory_load_user(state)
 
     # Then: warnings are set for both
-    assert result["preferences"] is not None
-    assert result["schema_docs_warning"] is not None
-    assert result["memory_warning"] is not None
+    assert result["memory"].get("preferences") is not None
+    assert result["query"].get("docs_warning") is not None
+    assert result["memory"].get("warning") is not None
 
 
 @pytest.mark.asyncio
@@ -326,12 +350,13 @@ async def test_memory_load_user_soft_fails_on_both_db_errors(
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _ErrorStore)
 
     # When: loading user memory
-    result = await memory_load_user({"steps": []})
+    state = GraphState()
+    result = await memory_load_user(state)
 
     # Then: defaults are used and warnings are set
-    assert result["preferences"] == default_preferences()
-    assert result["memory_warning"] is not None
-    assert result["schema_docs_warning"] is not None
+    assert result["memory"]["preferences"] == default_preferences()
+    assert result["memory"].get("warning") is not None
+    assert result["query"].get("docs_warning") is not None
 
 
 # ---------------------------------------------------------------------------
@@ -343,24 +368,26 @@ async def test_memory_load_user_soft_fails_on_both_db_errors(
 async def test_memory_update_session_snapshots_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Session update snapshots fields for next session."""
+    """Session update snapshots SQL into conversation history."""
     # Given: completed query state
-    state = {
-        "steps": [],
-        "user_input": "list films",
-        "last_result": {"sql": "SELECT * FROM film LIMIT 5", "kind": "query_answer"},
-        "assumptions": ["public"],
-        "recent_filters": {},
-        "preferences_dirty": False,
-    }
+    state = GraphState(
+        user_input="list films",
+        query=QueryPipelineState(
+            generated_sql="SELECT * FROM film LIMIT 5",
+            execution_result={"success": True, "rows_returned": 2},
+            explanation="Found films.",
+        ),
+    )
 
     # When: updating session
     result = await memory_update_session(state)
 
-    # Then: fields are snapshotted
-    assert result["previous_user_input"] == "list films"
-    assert result["previous_sql"] == "SELECT * FROM film LIMIT 5"
+    # Then: conversation history has the new turn
     assert "memory_update_session" in result["steps"]
+    history = result["memory"]["conversation_history"]
+    assert len(history) == 1
+    assert history[0].user_input == "list films"
+    assert history[0].sql == "SELECT * FROM film LIMIT 5"
 
 
 @pytest.mark.asyncio
@@ -381,12 +408,13 @@ async def test_memory_update_session_upserts_when_dirty(
         lambda settings=None: _CapturingPrefsStore(),
     )
 
-    state = {
-        "steps": [],
-        "user_id": "bob",
-        "preferences": {"preferred_language": "fr", "row_limit_hint": 20},
-        "preferences_dirty": True,
-    }
+    state = GraphState(
+        user_id="bob",
+        memory=MemoryState(
+            preferences={"preferred_language": "fr", "row_limit_hint": 20},
+            preferences_dirty=True,
+        ),
+    )
 
     # When: updating session
     await memory_update_session(state)
@@ -405,16 +433,17 @@ async def test_memory_update_session_skips_upsert_on_db_error(
     # Given: failing prefs store
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
 
-    state = {
-        "steps": [],
-        "user_id": "carol",
-        "preferences": {"row_limit_hint": 5},
-        "preferences_dirty": True,
-    }
+    state = GraphState(
+        user_id="carol",
+        memory=MemoryState(
+            preferences={"row_limit_hint": 5},
+            preferences_dirty=True,
+        ),
+    )
 
     # When: updating session
     result = await memory_update_session(state)
 
     # Then: warning is set
-    assert result.get("memory_warning") is not None
-    assert "could not persist" in result["memory_warning"]
+    assert result.get("memory", {}).get("warning") is not None
+    assert "could not persist" in result["memory"]["warning"]
