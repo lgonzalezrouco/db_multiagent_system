@@ -25,7 +25,12 @@ def _human_content(captured: list[Any]) -> str:
     """Return the content of the first HumanMessage in *captured*."""
     for m in captured:
         if isinstance(m, HumanMessage):
-            return m.content
+            content = m.content
+            if isinstance(content, str):
+                return content
+            raise AssertionError(
+                f"Expected HumanMessage content to be str, got {type(content)}"
+            )
     raise AssertionError("No HumanMessage found in captured messages")
 
 

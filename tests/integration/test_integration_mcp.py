@@ -81,7 +81,12 @@ async def test_query_pipeline_via_live_mcp_http(
 
         # Then: query answer is returned
         if result.get("last_error"):
-            qer = result.get("query_execution_result")
+            q = result.get("query")
+            qer = None
+            if isinstance(q, dict):
+                qer = q.get("execution_result")
+            elif q is not None:
+                qer = getattr(q, "execution_result", None)
             nested: dict = {}
             if isinstance(qer, dict):
                 err = qer.get("error")

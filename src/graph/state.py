@@ -16,7 +16,7 @@ def append_steps(current: list[str], update: list[str]) -> list[str]:
     return current + (update or [])
 
 
-def merge_submodel(current: BaseModel, update: BaseModel | dict | None) -> BaseModel:
+def merge_submodel[T: BaseModel](current: T, update: BaseModel | dict | None) -> T:
     """Deep-merge a partial dict or sub-model into the current sub-model.
 
     Only the keys explicitly provided in *update* are overwritten; all other
