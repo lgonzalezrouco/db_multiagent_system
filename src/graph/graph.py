@@ -1,4 +1,4 @@
-"""LangGraph workflow: schema-presence gate → schema pipeline or query pipeline."""
+"""LangGraph workflows: schema pipeline (HITL) and query pipeline (separate graphs)."""
 
 from __future__ import annotations
 
@@ -28,13 +28,13 @@ from graph.nodes.query_nodes import (
     route_after_preferences_infer,
 )
 from graph.nodes.schema_nodes import (
+    route_after_schema_hitl,
     schema_draft,
     schema_hitl,
     schema_inspect,
     schema_persist,
 )
-from graph.presence import DbSchemaPresence, SchemaPresence
-from graph.state import GraphState
+from graph.state import QueryGraphState, SchemaGraphState
 
 logger = logging.getLogger(__name__)
 
@@ -112,37 +112,30 @@ def graph_run_config(
     return config, state_seed
 
 
-def route_after_persist(state: GraphState) -> str:
-    """After schema_persist: pivot to query pipeline if a user query is waiting."""
-    if state.schema_pipeline.persist_error:
-        logger.warning(
-            "schema_to_query_pivot skipped: persist_error=%r",
-            state.schema_pipeline.persist_error,
-        )
-        return "end"
-    if (state.user_input or "").strip():
-        return "query_path"
-    return "end"
-
-
-def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
-    """Build workflow with conditional routing from ``START``."""
-    resolved: SchemaPresence = presence or DbSchemaPresence.from_settings()
-
-    def route_after_start(_state: GraphState) -> str:
-        presence_result = resolved.check()
-        ready = presence_result.ready
-        return "query_path" if ready else "schema_path"
-
-    workflow: StateGraph = StateGraph(GraphState)
-
-    # Schema path nodes
+def build_schema_graph() -> StateGraph:
+    """Schema agent: inspect → draft → HITL → persist (or end on reject)."""
+    workflow: StateGraph = StateGraph(SchemaGraphState)
     workflow.add_node("schema_inspect", schema_inspect)
     workflow.add_node("schema_draft", schema_draft)
     workflow.add_node("schema_hitl", schema_hitl)
     workflow.add_node("schema_persist", schema_persist)
 
-    # Query path nodes
+    workflow.add_edge(START, "schema_inspect")
+    workflow.add_edge("schema_inspect", "schema_draft")
+    workflow.add_edge("schema_draft", "schema_hitl")
+    workflow.add_conditional_edges(
+        "schema_hitl",
+        route_after_schema_hitl,
+        {"persist": "schema_persist", "end": END},
+    )
+    workflow.add_edge("schema_persist", END)
+    return workflow
+
+
+def build_query_graph() -> StateGraph:
+    """Query agent: memory → preferences → plan → SQL → critic → execute → explain."""
+    workflow: StateGraph = StateGraph(QueryGraphState)
+
     workflow.add_node("memory_load_user", memory_load_user)
     workflow.add_node("query_load_context", query_load_context)
     workflow.add_node("preferences_infer", preferences_infer)
@@ -157,26 +150,7 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     workflow.add_node("query_refine_cap", query_refine_cap)
     workflow.add_node("memory_update_session", memory_update_session)
 
-    workflow.add_conditional_edges(
-        START,
-        route_after_start,
-        {
-            "schema_path": "schema_inspect",
-            "query_path": "memory_load_user",
-        },
-    )
-
-    # Schema path edges
-    workflow.add_edge("schema_inspect", "schema_draft")
-    workflow.add_edge("schema_draft", "schema_hitl")
-    workflow.add_edge("schema_hitl", "schema_persist")
-    workflow.add_conditional_edges(
-        "schema_persist",
-        route_after_persist,
-        {"query_path": "memory_load_user", "end": END},
-    )
-
-    # Query path edges
+    workflow.add_edge(START, "memory_load_user")
     workflow.add_edge("memory_load_user", "query_load_context")
     workflow.add_edge("query_load_context", "preferences_infer")
     workflow.add_conditional_edges(
@@ -210,11 +184,13 @@ def build_graph(*, presence: SchemaPresence | None = None) -> StateGraph:
     return workflow
 
 
-def get_compiled_graph(
-    *,
-    presence: SchemaPresence | None = None,
-    checkpointer: Any | None = None,
-):
-    """Compile with ``MemorySaver`` by default (HITL uses in-node ``interrupt()``)."""
+def get_compiled_schema_graph(*, checkpointer: Any | None = None):
+    """Compile schema graph with ``MemorySaver`` by default."""
     ckpt = checkpointer if checkpointer is not None else MemorySaver()
-    return build_graph(presence=presence).compile(checkpointer=ckpt)
+    return build_schema_graph().compile(checkpointer=ckpt)
+
+
+def get_compiled_query_graph(*, checkpointer: Any | None = None):
+    """Compile query graph with ``MemorySaver`` by default."""
+    ckpt = checkpointer if checkpointer is not None else MemorySaver()
+    return build_query_graph().compile(checkpointer=ckpt)

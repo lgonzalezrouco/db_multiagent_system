@@ -97,17 +97,17 @@ echo "How many customers are there?" | uv run python main.py
 uv run python main.py --no-bootstrap
 ```
 
-On first run (no schema docs persisted yet) the system automatically follows the **schema path**: it inspects the database, drafts descriptions with the LLM, then pauses for your approval before writing anything. After you approve, subsequent runs go straight to the **query path**.
+Use **Streamlit** (Schema agent tab) to generate and approve schema documentation before asking questions in the **Query agent** tab. The CLI (`main.py`) runs only the **query** graph.
 
 ### 5. Streamlit UI
 
-The web UI uses the **same** compiled graph, checkpointing, and `graph_run_config` as the CLI, with **`run_kind="streamlit"`** so LangSmith traces can be filtered separately from CLI runs. **Schema** HITL and **preferences** HITL are handled in the browser (approve, reject, or edit JSON) instead of the terminal.
+The app has two sections (**Schema agent** / **Query agent**). Each uses its own compiled LangGraph, checkpointing, and `graph_run_config(..., run_kind="streamlit")`. The Schema tab runs inspect → draft → HITL (approve, edit JSON, or reject) on demand. The Query tab mirrors the old chat flow (including preferences HITL) and is disabled until schema docs exist in app memory, with a shortcut to open the Schema tab.
 
 ```bash
 uv run streamlit run src/ui/app.py
 ```
 
-Use the same `.env` / Docker setup as above. Optional: set **`DEFAULT_THREAD_ID`** to pin the LangGraph thread for the session; otherwise the UI generates a stable id per browser session. **New chat** in the sidebar starts a fresh thread id and clears the transcript.
+Use the same `.env` / Docker setup as above. Optional: set **`DEFAULT_THREAD_ID`** for the query chat thread. **New query chat** / **New schema session** in the sidebar reset the respective thread ids and messages.
 
 ---
 
@@ -179,10 +179,10 @@ The CLI still emits **errors and warnings** to stderr; LangSmith remains the pri
 │   │   └── schemas/             # Pydantic output models
 │   ├── config/                  # pydantic-settings: postgres, app memory, MCP, LLM
 │   ├── graph/
-│   │   ├── graph.py             # StateGraph wiring (schema + query paths), MemorySaver, graph_run_config()
-│   │   ├── invoke_v2.py         # unwrap_graph_v2 (CLI + Streamlit, version="v2")
-│   │   ├── state.py             # GraphState
-│   │   ├── presence.py          # DbSchemaPresence — gate on schema_docs
+│   │   ├── graph.py             # Two graphs: schema + query; MemorySaver; graph_run_config()
+│   │   ├── invoke_v2.py         # unwrap_query_graph_v2 / unwrap_schema_graph_v2 (version="v2")
+│   │   ├── state.py             # SchemaGraphState, QueryGraphState (+ sub-models)
+│   │   ├── presence.py          # DbSchemaPresence — schema_docs readiness (UI / query gate)
 │   │   ├── nodes/
 │   │   │   ├── schema_nodes/    # schema_inspect, schema_draft, schema_hitl, schema_persist
 │   │   │   └── query_nodes/     # preferences_*, query_*, query_refine_cap, routing helpers

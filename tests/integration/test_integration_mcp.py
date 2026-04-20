@@ -10,12 +10,11 @@ import uvicorn
 from pydantic import ValidationError
 
 from config import PostgresSettings, Settings
-from graph import get_compiled_graph, graph_run_config
-from graph.invoke_v2 import unwrap_graph_v2
+from graph import get_compiled_query_graph, graph_run_config
+from graph.invoke_v2 import unwrap_query_graph_v2
 from mcp_server.main import build_app
 from mcp_server.readonly_sql import execute_readonly_sql
 from mcp_server.schema_metadata import fetch_schema_metadata
-from tests.schema_presence_stubs import ReadySchemaPresence
 
 
 def _postgres_settings_or_skip() -> PostgresSettings:
@@ -66,7 +65,7 @@ async def test_query_pipeline_via_live_mcp_http(
         monkeypatch.setenv("MCP_SERVER_URL", f"http://127.0.0.1:{port}/mcp")
 
         # When: invoking the graph
-        app = get_compiled_graph(presence=ReadySchemaPresence())
+        app = get_compiled_query_graph()
         cfg, state_seed = graph_run_config(
             thread_id="mcp-integration-1", run_kind="pytest"
         )
@@ -76,7 +75,7 @@ async def test_query_pipeline_via_live_mcp_http(
         )
 
         # Then: query answer is returned
-        state, _ = unwrap_graph_v2(out)
+        state, _ = unwrap_query_graph_v2(out)
         if state.last_error:
             qer = state.query.execution_result
             nested: dict = {}
@@ -93,7 +92,6 @@ async def test_query_pipeline_via_live_mcp_http(
         assert lr.get("kind") == "query_answer"
         assert state.steps == [
             "memory_load_user",
-            "gate:query_path",
             "query_load_context",
             "preferences_infer",
             "query_plan",

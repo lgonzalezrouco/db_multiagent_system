@@ -1,4 +1,4 @@
-"""Shared LangGraph state for the DB multi-agent system."""
+"""LangGraph state: separate models for schema and query graphs."""
 
 from __future__ import annotations
 
@@ -25,6 +25,16 @@ def merge_submodel[T: BaseModel](current: T, update: BaseModel | dict | None) ->
     return current.model_copy(update=update.model_dump(exclude_unset=True))
 
 
+class _BaseRunState(BaseModel):
+    """Fields shared by schema and query graphs (trace + output channel)."""
+
+    user_id: str = "default"
+    session_id: str | None = None
+    steps: Annotated[list[str], append_steps] = Field(default_factory=list)
+    last_result: str | dict | None = None
+    last_error: str | None = None
+
+
 class SchemaPipelineState(BaseModel):
     """State owned by the schema pipeline (inspect → draft → HITL → persist)."""
 
@@ -32,8 +42,17 @@ class SchemaPipelineState(BaseModel):
     metadata: dict | None = None
     draft: dict | None = None
     approved: dict | None = None
+    rejected: bool = False
     hitl_prompt: dict | None = None
     persist_error: str | None = None
+
+
+class SchemaGraphState(_BaseRunState):
+    """State for the schema-only LangGraph."""
+
+    schema_pipeline: Annotated[SchemaPipelineState, merge_submodel] = Field(
+        default_factory=SchemaPipelineState,
+    )
 
 
 class QueryPipelineState(BaseModel):
@@ -71,22 +90,11 @@ class MemoryState(BaseModel):
     warning: str | None = None
 
 
-class GraphState(BaseModel):
-    """LangGraph state: schema gate, schema HITL, query pipeline, and memory fields."""
+class QueryGraphState(_BaseRunState):
+    """State for the query-only LangGraph."""
 
     user_input: str = ""
-    steps: Annotated[list[str], append_steps] = Field(default_factory=list)
-    gate_decision: str | None = None
-    user_id: str = "default"
-    session_id: str | None = None
-    last_result: str | dict | None = None
-    last_error: str | None = None
-
-    # Field name avoids shadowing BaseModel.schema(); nodes must use this key.
-    schema_pipeline: Annotated[SchemaPipelineState, merge_submodel] = Field(
-        default_factory=SchemaPipelineState,
-    )
     query: Annotated[QueryPipelineState, merge_submodel] = Field(
-        default_factory=QueryPipelineState
+        default_factory=QueryPipelineState,
     )
     memory: Annotated[MemoryState, merge_submodel] = Field(default_factory=MemoryState)

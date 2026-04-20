@@ -4,12 +4,12 @@ import logging
 from typing import Any
 
 from agents.query_agent import build_query_plan
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
 
-async def query_plan(state: GraphState) -> dict[str, Any]:
+async def query_plan(state: QueryGraphState) -> dict[str, Any]:
     ctx = state.query.docs_context
     prefs = state.memory.preferences
     history = state.memory.conversation_history or []

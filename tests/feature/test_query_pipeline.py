@@ -7,15 +7,18 @@ from typing import Any
 
 import pytest
 
-from agents.schemas.query_outputs import QueryCritiqueOutput, QueryExplanationOutput
-from graph import get_compiled_graph, graph_run_config
-from graph.invoke_v2 import unwrap_graph_v2
+from agents.schemas.query_outputs import (
+    QueryCritiqueOutput,
+    QueryExplanationOutput,
+    QueryPlanOutput,
+    SqlGenerationOutput,
+)
+from graph import get_compiled_query_graph, graph_run_config
+from graph.invoke_v2 import unwrap_query_graph_v2
 from graph.nodes.query_nodes import validate_sql_for_execution
-from tests.schema_presence_stubs import ReadySchemaPresence
 
 _QUERY_SUCCESS_STEPS = [
     "memory_load_user",
-    "gate:query_path",
     "query_load_context",
     "preferences_infer",
     "query_plan",
@@ -128,7 +131,7 @@ def test_graph_compiles_successfully() -> None:
     # Given: no preconditions
 
     # When: compiling the graph
-    app = get_compiled_graph()
+    app = get_compiled_query_graph()
 
     # Then: app is returned
     assert app is not None
@@ -163,7 +166,7 @@ async def test_graph_ainvoke_completes_query_pipeline_with_mocked_mcp(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
@@ -171,10 +174,8 @@ async def test_graph_ainvoke_completes_query_pipeline_with_mocked_mcp(
     )
 
     # Then: query pipeline completes successfully
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
-    assert state.gate_decision == "query_path"
-    assert state.schema_pipeline.ready is True
     lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
@@ -210,7 +211,7 @@ async def test_graph_works_without_postgres_env_vars(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="shell-smoke-2", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "ping", "steps": [], **state_seed},
@@ -218,10 +219,8 @@ async def test_graph_works_without_postgres_env_vars(
     )
 
     # Then: query pipeline completes successfully
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
-    assert state.gate_decision == "query_path"
-    assert state.schema_pipeline.ready is True
     lr = state.last_result
     assert isinstance(lr, dict)
     assert lr.get("kind") == "query_answer"
@@ -246,7 +245,7 @@ async def test_pipeline_clears_last_result_on_tool_error(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     # When: invoking with pre-existing last_result
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="shell-error-1", run_kind="pytest")
     out = await app.ainvoke(
         {
@@ -259,7 +258,7 @@ async def test_pipeline_clears_last_result_on_tool_error(
     )
 
     # Then: last_result is cleared and error is set
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.last_error is not None
     assert state.last_result is None
@@ -314,7 +313,7 @@ async def test_critic_retry_then_success(
     monkeypatch.setattr(query_gen_mod, "build_sql", _build_sql)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="query-retry-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "count actors", "steps": [], **state_seed},
@@ -322,10 +321,9 @@ async def test_critic_retry_then_success(
     )
 
     # Then: retry occurred and succeeded
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.steps == [
         "memory_load_user",
-        "gate:query_path",
         "query_load_context",
         "preferences_infer",
         "query_plan",
@@ -385,7 +383,7 @@ async def test_refinement_cap_prevents_infinite_retry(
     monkeypatch.setattr(query_gen_mod, "build_sql", _bad_sql)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="query-cap-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "never lands", "steps": [], **state_seed},
@@ -393,10 +391,9 @@ async def test_refinement_cap_prevents_infinite_retry(
     )
 
     # Then: cap is reached and error is reported
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.steps == [
         "memory_load_user",
-        "gate:query_path",
         "query_load_context",
         "preferences_infer",
         "query_plan",
@@ -447,6 +444,19 @@ async def test_semantic_critic_rejection_triggers_retry(
             self.kind = kind
 
         async def ainvoke(self, _messages: list[Any]) -> Any:
+            if self.kind == "plan":
+                return QueryPlanOutput(
+                    intent="explore",
+                    summary="count rentals",
+                    relevant_tables=["public.rental"],
+                    notes=[],
+                    assumptions=[],
+                )
+            if self.kind == "sql":
+                return SqlGenerationOutput(
+                    sql="SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10",
+                    rationale="test stub sql",
+                )
             if self.kind == "critique":
                 call_index = len(critique_calls)
                 critique_calls.append(call_index)
@@ -485,6 +495,8 @@ async def test_semantic_critic_rejection_triggers_retry(
         def with_structured_output(self, schema: type[Any]) -> _StructuredRunnable:
             name = getattr(schema, "__name__", "")
             mapping = {
+                "QueryPlanOutput": "plan",
+                "SqlGenerationOutput": "sql",
                 "QueryCritiqueOutput": "critique",
                 "QueryExplanationOutput": "explain",
                 "PreferencesInferenceOutput": "preferences_infer",
@@ -523,7 +535,7 @@ async def test_semantic_critic_rejection_triggers_retry(
     monkeypatch.setattr("agents.query_agent.create_chat_llm", _fake_create_chat_llm)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(
         thread_id="query-semantic-retry-1",
         run_kind="pytest",
@@ -534,10 +546,9 @@ async def test_semantic_critic_rejection_triggers_retry(
     )
 
     # Then: retry occurred with correct SQL
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.steps == [
         "memory_load_user",
-        "gate:query_path",
         "query_load_context",
         "preferences_infer",
         "query_plan",
@@ -607,7 +618,7 @@ async def test_missing_schema_docs_sets_warning(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="query-docs-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "smoke", "steps": [], **state_seed},
@@ -615,7 +626,7 @@ async def test_missing_schema_docs_sets_warning(
     )
 
     # Then: warning is set and included in limitations
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     warn = state.query.docs_warning
     assert isinstance(warn, str) and warn
     lr = state.last_result
@@ -656,7 +667,7 @@ async def test_mcp_error_message_propagates_to_last_error(
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id="query-mcp-err-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "broken query path", "steps": [], **state_seed},
@@ -664,7 +675,7 @@ async def test_mcp_error_message_propagates_to_last_error(
     )
 
     # Then: error message is in last_error
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.last_error == expected_msg
     assert state.last_result is None
 
@@ -711,7 +722,7 @@ async def test_explain_falls_back_when_llm_fails(
     monkeypatch.setattr(explain_mod, "build_query_explanation", _boom)
 
     # When: invoking the graph
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(
         thread_id="query-explain-fallback-1",
         run_kind="pytest",
@@ -722,7 +733,7 @@ async def test_explain_falls_back_when_llm_fails(
     )
 
     # Then: fallback explanation is used
-    state = unwrap_graph_v2(out)[0]
+    state = unwrap_query_graph_v2(out)[0]
     assert state.last_error is None
     lr = state.last_result
     assert isinstance(lr, dict)
@@ -761,7 +772,7 @@ async def test_two_turns_accumulate_conversation_history(
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(
         thread_id="two-turn-history-1", run_kind="pytest"
     )
@@ -770,13 +781,13 @@ async def test_two_turns_accumulate_conversation_history(
     q2 = "Now show me his movies."
 
     out1 = await app.ainvoke({"user_input": q1, "steps": [], **state_seed}, config=cfg)
-    state1 = unwrap_graph_v2(out1)[0]
+    state1 = unwrap_query_graph_v2(out1)[0]
     assert state1.last_error is None
     assert len(state1.memory.conversation_history) == 1
     assert state1.memory.conversation_history[0].user_input == q1
 
     out2 = await app.ainvoke({"user_input": q2, "steps": [], **state_seed}, config=cfg)
-    state2 = unwrap_graph_v2(out2)[0]
+    state2 = unwrap_query_graph_v2(out2)[0]
     assert state2.last_error is None
     assert len(state2.memory.conversation_history) == 2
     assert state2.memory.conversation_history[1].user_input == q2
@@ -868,7 +879,7 @@ async def test_second_turn_receives_history_in_llm_prompt(
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(
         thread_id="two-turn-history-2", run_kind="pytest"
     )

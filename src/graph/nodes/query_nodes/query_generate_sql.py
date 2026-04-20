@@ -4,12 +4,12 @@ import logging
 from typing import Any
 
 from agents.query_agent import build_sql
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
 
-async def query_generate_sql(state: GraphState) -> dict[str, Any]:
+async def query_generate_sql(state: QueryGraphState) -> dict[str, Any]:
     ctx = state.query.docs_context
     prefs = state.memory.preferences
     cf = (

@@ -13,7 +13,7 @@ from graph.nodes.query_nodes.query_critic import (
     _normalize_safety_strictness,
     query_critic,
 )
-from graph.state import GraphState, MemoryState, QueryPipelineState
+from graph.state import MemoryState, QueryGraphState, QueryPipelineState
 
 
 def test_normalize_returns_normal_for_none_prefs() -> None:
@@ -153,8 +153,8 @@ def _make_state(
     sql: str = "SELECT * FROM film LIMIT 10",
     strictness: str = "normal",
     refinement_count: int = 0,
-) -> GraphState:
-    return GraphState(
+) -> QueryGraphState:
+    return QueryGraphState(
         user_input="test",
         memory=MemoryState(preferences={"safety_strictness": strictness}),
         query=QueryPipelineState(

@@ -5,7 +5,7 @@ Covers:
 - preferences_infer proposes a delta → HITL interrupt fires
 - HITL approval resumes → preferences_persist patches the store → turn completes
 - HITL rejection resumes with None → prefs unchanged, turn completes
-- Approved pref (row_limit_hint) is enforced on the very next SQL via enforce_limit
+- Approved pref (row_limit_hint) is used as default LIMIT when SQL has no LIMIT
 - Approved pref (output_format) is reflected in last_result["output_format"]
 - Approved pref (safety_strictness=lenient) allows critic to pass despite risks
 - preferences_dirty write-back through memory_update_session persists changes
@@ -20,10 +20,9 @@ import pytest
 from langgraph.types import Command
 
 from agents.schemas.preferences_outputs import PreferencesInferenceOutput
-from graph import get_compiled_graph, graph_run_config
-from graph.invoke_v2 import unwrap_graph_v2
+from graph import get_compiled_query_graph, graph_run_config
+from graph.invoke_v2 import unwrap_query_graph_v2
 from memory.preferences import default_preferences
-from tests.schema_presence_stubs import ReadySchemaPresence
 
 
 class _FakeTool:
@@ -106,12 +105,12 @@ async def test_no_delta_skips_hitl_and_completes(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-no-delta-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "list films", "steps": [], **seed}, config=cfg
     )
-    state, interrupts = unwrap_graph_v2(out)
+    state, interrupts = unwrap_query_graph_v2(out)
 
     assert not interrupts, "expected no interrupts when delta is None"
     assert "preferences_infer" in state.steps
@@ -134,14 +133,14 @@ async def test_delta_proposed_triggers_hitl_interrupt(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-hitl-1", run_kind="pytest")
     out = await app.ainvoke(
         {"user_input": "always show results as JSON", "steps": [], **seed},
         config=cfg,
         version="v2",
     )
-    state, interrupts = unwrap_graph_v2(out)
+    state, interrupts = unwrap_query_graph_v2(out)
 
     assert interrupts, "expected interrupt at preferences_hitl"
     payload = getattr(interrupts[0], "value", interrupts[0])
@@ -171,7 +170,7 @@ async def test_hitl_approval_persists_and_completes_turn(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-approve-1", run_kind="pytest")
 
     # Turn 1: triggers HITL
@@ -185,7 +184,7 @@ async def test_hitl_approval_persists_and_completes_turn(
     out2 = await app.ainvoke(
         Command(resume={"output_format": "json"}), config=cfg, version="v2"
     )
-    state, interrupts = unwrap_graph_v2(out2)
+    state, interrupts = unwrap_query_graph_v2(out2)
 
     assert not interrupts, "expected no further interrupts after approval"
     assert "preferences_persist" in state.steps
@@ -229,7 +228,7 @@ async def test_hitl_rejection_leaves_prefs_unchanged(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-reject-1", run_kind="pytest")
 
     await app.ainvoke(
@@ -239,7 +238,7 @@ async def test_hitl_rejection_leaves_prefs_unchanged(
     )
     # Resume with "reject" sentinel = rejection
     out2 = await app.ainvoke(Command(resume="reject"), config=cfg, version="v2")
-    state, interrupts = unwrap_graph_v2(out2)
+    state, interrupts = unwrap_query_graph_v2(out2)
 
     assert not interrupts, f"unexpected interrupts: {interrupts}"
     # persist must NOT have been called (no data patched into fake_store)
@@ -252,7 +251,7 @@ async def test_approved_row_limit_hint_enforced_in_sql(
     postgres_env: None,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """After approving row_limit_hint=3, the SQL gets LIMIT 3 injected."""
+    """After approving row_limit_hint=3, SQL without LIMIT gets LIMIT 3 injected."""
     fake_store = _FakePrefsStore()
     infer_mod = importlib.import_module("graph.nodes.query_nodes.preferences_infer")
     persist_mod = importlib.import_module("graph.nodes.query_nodes.preferences_persist")
@@ -271,7 +270,7 @@ async def test_approved_row_limit_hint_enforced_in_sql(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-limit-1", run_kind="pytest")
 
     # Turn 1: trigger HITL for row_limit_hint=3
@@ -290,10 +289,28 @@ async def test_approved_row_limit_hint_enforced_in_sql(
         "infer_preferences_delta",
         _no_delta_infer,
     )
+    query_gen_mod = importlib.import_module(
+        "graph.nodes.query_nodes.query_generate_sql",
+    )
+
+    async def _sql_no_limit(
+        _ui: str,
+        _qp: dict[str, Any] | None,
+        _sc: dict[str, Any] | None,
+        _rc: int,
+        **_kw: Any,
+    ) -> str:
+        return (
+            "SELECT actor_id, first_name, last_name "
+            "FROM public.actor ORDER BY actor_id ASC"
+        )
+
+    monkeypatch.setattr(query_gen_mod, "build_sql", _sql_no_limit)
+
     out = await app.ainvoke(
         {"user_input": "list actors", "steps": [], **seed}, config=cfg
     )
-    state, _ = unwrap_graph_v2(out)
+    state, _ = unwrap_query_graph_v2(out)
 
     sql = state.query.generated_sql or ""
     assert "LIMIT 3" in sql.upper(), f"Expected LIMIT 3 in SQL, got: {sql!r}"
@@ -323,7 +340,7 @@ async def test_approved_output_format_json_reflected_in_last_result(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-fmt-1", run_kind="pytest")
 
     await app.ainvoke(
@@ -345,7 +362,7 @@ async def test_approved_output_format_json_reflected_in_last_result(
     out = await app.ainvoke(
         {"user_input": "list actors", "steps": [], **seed}, config=cfg
     )
-    state, _ = unwrap_graph_v2(out)
+    state, _ = unwrap_query_graph_v2(out)
 
     lr = state.last_result
     assert isinstance(lr, dict), f"last_result is not a dict: {lr!r}"
@@ -390,7 +407,7 @@ async def test_approved_lenient_strictness_passes_critic_with_risks(
             assumptions=[],
         ).model_dump()
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-lenient-1", run_kind="pytest")
 
     await app.ainvoke(
@@ -414,7 +431,7 @@ async def test_approved_lenient_strictness_passes_critic_with_risks(
     out = await app.ainvoke(
         {"user_input": "show me films", "steps": [], **seed}, config=cfg
     )
-    state, _ = unwrap_graph_v2(out)
+    state, _ = unwrap_query_graph_v2(out)
 
     # Under lenient mode, critic accepts despite risks → execute must have run
     assert "query_execute" in state.steps
@@ -427,7 +444,7 @@ async def test_preferences_dirty_flag_triggers_upsert_in_update_session(
 ) -> None:
     """When preferences_dirty=True, memory_update_session upserts to the store."""
     from graph.memory_nodes import memory_update_session
-    from graph.state import GraphState, MemoryState
+    from graph.state import MemoryState, QueryGraphState
 
     upserted: list[dict] = []
 
@@ -443,7 +460,7 @@ async def test_preferences_dirty_flag_triggers_upsert_in_update_session(
         memory_mod, "UserPreferencesStore", lambda settings=None: _CapturingStore()
     )
 
-    state = GraphState(
+    state = QueryGraphState(
         user_id="alice",
         memory=MemoryState(
             preferences={"output_format": "json", "row_limit_hint": 5},
@@ -488,7 +505,7 @@ async def test_preferences_persist_db_error_does_not_abort_turn(
     )
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_mcp_client)
 
-    app = get_compiled_graph(presence=ReadySchemaPresence())
+    app = get_compiled_query_graph()
     cfg, seed = graph_run_config(thread_id="pref-persist-fail-1", run_kind="pytest")
 
     await app.ainvoke(
@@ -499,7 +516,7 @@ async def test_preferences_persist_db_error_does_not_abort_turn(
     out2 = await app.ainvoke(
         Command(resume={"output_format": "json"}), config=cfg, version="v2"
     )
-    state, interrupts = unwrap_graph_v2(out2)
+    state, interrupts = unwrap_query_graph_v2(out2)
 
     # Graph must still complete — soft-fail
     assert not interrupts

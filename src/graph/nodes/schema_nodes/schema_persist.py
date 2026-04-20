@@ -9,7 +9,7 @@ from typing import Any
 import psycopg
 
 from config.memory_settings import AppMemorySettings
-from graph.state import GraphState
+from graph.state import SchemaGraphState
 from memory.schema_docs import SchemaDocsStore
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ def _normalize_approved(approved: Any) -> tuple[list[dict[str, Any]], str | None
     return out, None
 
 
-def schema_persist(state: GraphState) -> dict[str, Any]:
+def schema_persist(state: SchemaGraphState) -> dict[str, Any]:
     """Persist approved schema docs to app_memory via SchemaDocsStore."""
     out: dict[str, Any] = {
         "steps": ["schema_persist"],

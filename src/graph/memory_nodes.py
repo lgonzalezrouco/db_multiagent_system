@@ -8,7 +8,7 @@ from typing import Any
 import psycopg
 
 from config.memory_settings import AppMemorySettings
-from graph.state import GraphState
+from graph.state import QueryGraphState
 from memory.preferences import UserPreferencesStore, default_preferences
 from memory.schema_docs import SchemaDocsStore
 from memory.session import seed_session_fields, snapshot_session_fields
@@ -16,7 +16,7 @@ from memory.session import seed_session_fields, snapshot_session_fields
 logger = logging.getLogger(__name__)
 
 
-async def memory_load_user(state: GraphState) -> dict[str, Any]:
+async def memory_load_user(state: QueryGraphState) -> dict[str, Any]:
     """Load user preferences and approved schema docs from app_memory into state."""
     settings = AppMemorySettings()
     user_id = state.user_id or settings.default_user_id
@@ -68,7 +68,7 @@ async def memory_load_user(state: GraphState) -> dict[str, Any]:
     return out
 
 
-async def memory_update_session(state: GraphState) -> dict[str, Any]:
+async def memory_update_session(state: QueryGraphState) -> dict[str, Any]:
     """Snapshot session fields and persist dirty preferences to app_memory."""
     settings = AppMemorySettings()
     user_id = state.user_id or settings.default_user_id

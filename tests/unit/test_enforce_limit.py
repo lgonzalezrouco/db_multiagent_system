@@ -9,7 +9,7 @@ from graph.nodes.query_nodes.query_enforce_limit import (
     enforce_limit,
     query_enforce_limit,
 )
-from graph.state import GraphState, MemoryState, QueryPipelineState
+from graph.state import MemoryState, QueryGraphState, QueryPipelineState
 
 
 def test_get_row_limit_hint_returns_default_for_none() -> None:
@@ -55,11 +55,18 @@ def test_enforce_limit_injects_on_complex_query() -> None:
     assert "LIMIT 7" in result.upper()
 
 
-def test_enforce_limit_tightens_when_existing_limit_exceeds_hint() -> None:
+def test_enforce_limit_keeps_explicit_limit_above_hint() -> None:
+    """Explicit LIMIT survives: hint is only the default when LIMIT is missing."""
     sql = "SELECT * FROM film LIMIT 100"
     result = enforce_limit(sql, 10)
-    assert "LIMIT 10" in result.upper()
-    assert "LIMIT 100" not in result.upper()
+    assert "LIMIT 100" in result.upper()
+
+
+def test_enforce_limit_caps_when_above_max_allowed() -> None:
+    sql = "SELECT * FROM film LIMIT 600"
+    result = enforce_limit(sql, 10)
+    assert "LIMIT 500" in result.upper()
+    assert "LIMIT 600" not in result.upper()
 
 
 def test_enforce_limit_leaves_unchanged_when_existing_limit_at_hint() -> None:
@@ -74,10 +81,10 @@ def test_enforce_limit_leaves_unchanged_when_existing_limit_below_hint() -> None
     assert result == sql
 
 
-def test_enforce_limit_tightens_large_to_small() -> None:
+def test_enforce_limit_does_not_force_down_to_hint_when_under_cap() -> None:
     sql = "SELECT * FROM rental LIMIT 500"
     result = enforce_limit(sql, 1)
-    assert "LIMIT 1" in result.upper()
+    assert "LIMIT 500" in result.upper()
 
 
 def test_enforce_limit_does_not_touch_subquery_limit() -> None:
@@ -109,8 +116,8 @@ def test_enforce_limit_fallback_appends_limit_on_parse_failure() -> None:
     assert result  # non-empty
 
 
-def _make_state(sql: str | None, row_limit_hint: int = 10) -> GraphState:
-    return GraphState(
+def _make_state(sql: str | None, row_limit_hint: int = 10) -> QueryGraphState:
+    return QueryGraphState(
         user_input="test",
         memory=MemoryState(preferences={"row_limit_hint": row_limit_hint}),
         query=QueryPipelineState(generated_sql=sql),
@@ -126,10 +133,10 @@ async def test_node_injects_limit_when_absent() -> None:
 
 
 @pytest.mark.asyncio
-async def test_node_tightens_limit_when_too_large() -> None:
-    state = _make_state("SELECT * FROM film LIMIT 200", row_limit_hint=15)
+async def test_node_caps_only_when_over_max_allowed() -> None:
+    state = _make_state("SELECT * FROM film LIMIT 600", row_limit_hint=15)
     result = await query_enforce_limit(state)
-    assert "LIMIT 15" in result["query"]["generated_sql"].upper()
+    assert "LIMIT 500" in result["query"]["generated_sql"].upper()
 
 
 @pytest.mark.asyncio
@@ -150,7 +157,7 @@ async def test_node_is_noop_when_sql_is_empty() -> None:
 
 @pytest.mark.asyncio
 async def test_node_uses_default_limit_when_no_preferences() -> None:
-    state = GraphState(
+    state = QueryGraphState(
         user_input="test",
         query=QueryPipelineState(generated_sql="SELECT * FROM actor"),
     )

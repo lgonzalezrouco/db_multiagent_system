@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from graph.state import GraphState
+    from graph.state import QueryGraphState
 
 HISTORY_MAX_TURNS: int = 5
 HISTORY_ROWS_PREVIEW: int = 3
@@ -35,7 +35,7 @@ def _trim_rows(execution_result: dict[str, Any] | None) -> list[dict[str, Any]]:
     return out
 
 
-def seed_session_fields(state: GraphState) -> dict[str, Any]:
+def seed_session_fields(state: QueryGraphState) -> dict[str, Any]:
     """Preserve ``conversation_history`` when memory_load_user merges other fields."""
     return {
         "memory": {
@@ -44,7 +44,7 @@ def seed_session_fields(state: GraphState) -> dict[str, Any]:
     }
 
 
-def snapshot_session_fields(state: GraphState) -> dict[str, Any]:
+def snapshot_session_fields(state: QueryGraphState) -> dict[str, Any]:
     """Append a ConversationTurn after successful SQL execution; cap history FIFO."""
     from graph.state import ConversationTurn
 

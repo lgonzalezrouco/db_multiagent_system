@@ -3,18 +3,14 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
 
-async def query_load_context(state: GraphState) -> dict[str, Any]:
-    gate_decision = "query_path"
-
+async def query_load_context(state: QueryGraphState) -> dict[str, Any]:
     return {
-        "steps": [f"gate:{gate_decision}", "query_load_context"],
-        "gate_decision": gate_decision,
-        "schema_pipeline": {"ready": True},
+        "steps": ["query_load_context"],
         "query": {
             "refinement_count": 0,
             "critic_status": None,

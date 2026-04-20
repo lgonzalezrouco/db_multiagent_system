@@ -16,7 +16,7 @@ from graph.nodes.query_nodes.query_explain import (
     _get_pref,
     query_explain,
 )
-from graph.state import GraphState, MemoryState, QueryPipelineState
+from graph.state import MemoryState, QueryGraphState, QueryPipelineState
 from ui.formatters import format_query_answer_markdown
 
 _explain_mod = importlib.import_module("graph.nodes.query_nodes.query_explain")
@@ -191,8 +191,8 @@ def test_formatter_explanation_present_in_both_formats() -> None:
 def _make_state(
     prefs: dict | None = None,
     rows: list[dict] | None = None,
-) -> GraphState:
-    return GraphState(
+) -> QueryGraphState:
+    return QueryGraphState(
         user_input="list actors",
         memory=MemoryState(preferences=prefs or {}),
         query=QueryPipelineState(

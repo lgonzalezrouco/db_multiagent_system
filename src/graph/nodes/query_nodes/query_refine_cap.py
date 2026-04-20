@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
 
-async def query_refine_cap(state: GraphState) -> dict[str, Any]:
+async def query_refine_cap(state: QueryGraphState) -> dict[str, Any]:
     msg = "Critic rejected SQL after max refinement attempts."
     logger.warning("%s", msg)
 
