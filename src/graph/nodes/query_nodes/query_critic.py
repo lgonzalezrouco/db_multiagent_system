@@ -5,7 +5,7 @@ import os
 from typing import Any, Literal
 
 from agents.query_agent import build_query_critique
-from graph.state import GraphState
+from graph.state import QueryGraphState
 from mcp_server.readonly_sql import sql_has_limit, validate_readonly_sql
 
 logger = logging.getLogger(__name__)
@@ -119,7 +119,7 @@ def _apply_strictness(
     return {"critic_status": "accept", "critic_feedback": None}
 
 
-def route_after_critic(state: GraphState) -> Literal["execute", "retry", "cap"]:
+def route_after_critic(state: QueryGraphState) -> Literal["execute", "retry", "cap"]:
     if state.query.critic_status == "accept":
         return "execute"
     max_r = query_max_refinements()
@@ -128,7 +128,7 @@ def route_after_critic(state: GraphState) -> Literal["execute", "retry", "cap"]:
     return "cap"
 
 
-async def query_critic(state: GraphState) -> dict[str, Any]:
+async def query_critic(state: QueryGraphState) -> dict[str, Any]:
     sql_text = state.query.generated_sql
     sql_text = sql_text if isinstance(sql_text, str) else None
 

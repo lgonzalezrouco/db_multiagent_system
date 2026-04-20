@@ -7,13 +7,13 @@ from pydantic import ValidationError
 
 from config import MCPSettings
 from graph import mcp_helpers
-from graph.state import GraphState
+from graph.state import SchemaGraphState
 
 logger = logging.getLogger(__name__)
 
 
 def inspect_schema_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
-    """Short summary for ``GraphState.last_result`` after ``inspect_schema``."""
+    """Short summary for ``last_result`` after ``inspect_schema``."""
     if not payload:
         return {"kind": "inspect_schema", "success": False, "detail": "no_payload"}
     if payload.get("success"):
@@ -32,15 +32,12 @@ def inspect_schema_summary(payload: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
-async def schema_inspect(state: GraphState) -> dict[str, Any]:
-    """Call MCP ``inspect_schema``; store payload in ``schema.metadata``."""
-    gate_decision = "schema_path"
-
+async def schema_inspect(state: SchemaGraphState) -> dict[str, Any]:
+    """Call MCP ``inspect_schema``; store payload in ``schema_pipeline.metadata``."""
     out: dict[str, Any] = {
-        "steps": [f"gate:{gate_decision}", "schema_inspect"],
+        "steps": ["schema_inspect"],
         "last_error": None,
         "last_result": None,
-        "gate_decision": gate_decision,
         "schema_pipeline": {
             "ready": False,
             "persist_error": None,

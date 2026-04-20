@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from graph.state import GraphState
+from graph.state import QueryGraphState
 from ui.formatters import (
     default_schema_edit_json,
     format_query_answer_markdown,
@@ -47,10 +47,19 @@ def test_format_query_answer_markdown_truncates_at_max_rows() -> None:
     assert "Showing first 2 of 5" in md
 
 
+def test_format_query_answer_markdown_default_shows_100_rows_without_note() -> None:
+    """Default display cap is high enough for typical LIMIT queries (e.g. 100)."""
+    rows = [{"i": i} for i in range(100)]
+    result = {"sql": "SELECT i FROM t LIMIT 100", "columns": ["i"], "rows": rows}
+    md = format_query_answer_markdown(result)
+    assert "Showing first" not in md
+    assert "| 99 |" in md
+
+
 def test_format_turn_state_displays_error_when_present() -> None:
     """Turn state shows error message when last_error is set."""
     # Given: state with error
-    state = GraphState(last_error="MCP down", last_result=None)
+    state = QueryGraphState(last_error="MCP down", last_result=None)
 
     # When: formatting turn state
     text = format_turn_state(state)
@@ -62,7 +71,7 @@ def test_format_turn_state_displays_error_when_present() -> None:
 def test_format_turn_state_displays_query_answer() -> None:
     """Turn state formats query answer result."""
     # Given: state with query answer
-    state = GraphState(
+    state = QueryGraphState(
         last_error=None,
         last_result={
             "kind": "query_answer",
@@ -109,7 +118,7 @@ def test_format_schema_persist_markdown_success_singular_table() -> None:
 def test_format_turn_state_displays_schema_persist() -> None:
     """Turn state formats schema persist result without raw JSON."""
     # Given: state with schema persist result
-    state = GraphState(
+    state = QueryGraphState(
         last_error=None,
         last_result={
             "kind": "schema_persist",
@@ -124,6 +133,17 @@ def test_format_turn_state_displays_schema_persist() -> None:
     # Then: count is shown without raw JSON
     assert "3" in text
     assert "```json" not in text
+
+
+def test_schema_resume_from_inputs_reject_returns_sentinel() -> None:
+    """Reject mode returns the string sentinel for LangGraph resume."""
+    resume, err = schema_resume_from_inputs(
+        mode="reject",
+        draft={"tables": []},
+        edited_json="",
+    )
+    assert err is None
+    assert resume == "reject"
 
 
 def test_schema_resume_from_inputs_approve_returns_original_draft() -> None:

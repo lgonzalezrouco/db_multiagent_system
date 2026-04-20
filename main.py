@@ -1,4 +1,4 @@
-"""CLI entry: Postgres bootstrap, interactive LangGraph chat."""
+"""CLI entry: Postgres bootstrap, interactive LangGraph query chat."""
 
 from __future__ import annotations
 
@@ -11,13 +11,12 @@ from typing import Any
 
 import psycopg
 from langgraph.types import Command
-from langsmith.run_helpers import trace as ls_trace
 from pydantic import ValidationError
 
 from config import PostgresSettings
-from graph import get_compiled_graph, graph_run_config
-from graph.invoke_v2 import unwrap_graph_v2
-from graph.state import GraphState
+from graph import get_compiled_query_graph, graph_run_config
+from graph.invoke_v2 import unwrap_query_graph_v2
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +78,7 @@ def _print_query_answer(payload: dict[str, Any]) -> None:
         print(f"\n{lim}\n")
 
 
-def _print_outcome(state: GraphState) -> None:
+def _print_outcome(state: QueryGraphState) -> None:
     err = state.last_error
     if err:
         print(f"\nError: {err}\n", file=sys.stderr)
@@ -102,71 +101,49 @@ def _stdin_question() -> str | None:
     return text or None
 
 
-async def _prompt_schema_resume(interrupt_payload: dict[str, Any]) -> dict[str, Any]:
-    draft = interrupt_payload.get("draft")
-    print("\n--- Schema review (human approval required) ---\n")
+async def _prompt_preferences_resume(interrupt_payload: dict[str, Any]) -> Any:
+    print("\n--- Preference change review ---\n")
     print(json.dumps(interrupt_payload, indent=2, ensure_ascii=False, default=str))
-    print(
-        "\nType 'approve' to persist the draft above as-is, "
-        'or paste a JSON object: {"tables": [...]}  (see tests/test_schema_hitl.py).',
-    )
+    print("\nType 'approve' to apply proposed edits, or 'reject' to skip.")
 
     def _read() -> str:
-        return input("schema> ").strip()
+        return input("prefs> ").strip()
 
     line = await asyncio.to_thread(_read)
-    if not line:
-        return {"tables": []}
+    if line.lower() == "reject":
+        return "reject"
     if line.lower() == "approve":
-        tables = (draft or {}).get("tables") if isinstance(draft, dict) else None
-        if isinstance(tables, list) and tables:
-            return {"tables": tables}
-        print("approve: draft has no tables; sending empty tables (will fail persist).")
-        return {"tables": []}
+        proposed = interrupt_payload.get("proposed_delta") or {}
+        return {k: str(v) for k, v in proposed.items()}
     try:
-        parsed = json.loads(line)
+        return json.loads(line)
     except json.JSONDecodeError as exc:
         raise SystemExit(f"invalid JSON for resume: {exc}") from exc
-    if not isinstance(parsed, dict):
-        raise SystemExit("resume JSON must be an object")
-    return parsed
 
 
 async def _run_turn_with_hitl(
     app: Any,
-    input_arg: dict[str, Any] | Command,
+    input_arg: dict[str, Any],
     config: dict[str, Any],
-) -> dict[str, Any]:
-    user_input = input_arg.get("user_input", "") if isinstance(input_arg, dict) else ""
-    async with ls_trace(
-        "agent_turn",
-        run_type="chain",
-        inputs={"user_input": user_input},
-        tags=config.get("tags") or [],
-        metadata=config.get("metadata") or {},
-    ):
-        out = await app.ainvoke(input_arg, config=config, version="v2")
-        while True:
-            state, interrupts = unwrap_graph_v2(out)
-            if not interrupts:
-                return state
-            intr = interrupts[0]
-            payload = getattr(intr, "value", intr)
-            if not isinstance(payload, dict):
-                raise SystemExit(
-                    f"unexpected interrupt payload: {type(payload).__name__}"
-                )
-            if payload.get("kind") == "schema_review":
-                resume = await _prompt_schema_resume(payload)
-                out = await app.ainvoke(
-                    Command(resume=resume), config=config, version="v2"
-                )
-                continue
-            print(
-                f"\n(unhandled interrupt kind {payload!r}; stopping.)\n",
-                file=sys.stderr,
-            )
+) -> QueryGraphState:
+    out = await app.ainvoke(input_arg, config=config, version="v2")
+    while True:
+        state, interrupts = unwrap_query_graph_v2(out)
+        if not interrupts:
             return state
+        intr = interrupts[0]
+        payload = getattr(intr, "value", intr)
+        if not isinstance(payload, dict):
+            raise SystemExit(f"unexpected interrupt payload: {type(payload).__name__}")
+        if payload.get("kind") == "preferences_review":
+            resume = await _prompt_preferences_resume(payload)
+            out = await app.ainvoke(Command(resume=resume), config=config, version="v2")
+            continue
+        print(
+            f"\n(unhandled interrupt kind {payload!r}; stopping.)\n",
+            file=sys.stderr,
+        )
+        return state
 
 
 async def _interactive_chat(
@@ -174,15 +151,16 @@ async def _interactive_chat(
     thread_id: str | None,
     initial_question: str | None,
 ) -> int:
-    app = get_compiled_graph()
+    app = get_compiled_query_graph()
     cfg, state_seed = graph_run_config(thread_id=thread_id)
 
     print(
-        "DVD Rental agents — ask in natural language (read-only SQL via MCP).\n"
+        "DVD Rental query agent — ask in natural language (read-only SQL via MCP).\n"
+        "Schema documentation must be set up via Streamlit (Schema agent tab) first.\n"
         "Commands: empty line or /quit to exit.\n",
     )
 
-    async def one_turn(user_input: str) -> GraphState:
+    async def one_turn(user_input: str) -> QueryGraphState:
         initial: dict[str, Any] = {
             "user_input": user_input,
             "steps": [],
@@ -231,7 +209,7 @@ def main() -> int:
         format="%(levelname)s %(message)s",
     )
     parser = argparse.ArgumentParser(
-        description="Chat with the LangGraph DVD Rental agent.",
+        description="Chat with the LangGraph DVD Rental query agent.",
     )
     parser.add_argument(
         "--no-bootstrap",

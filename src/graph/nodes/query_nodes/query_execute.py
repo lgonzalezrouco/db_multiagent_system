@@ -7,12 +7,12 @@ from pydantic import ValidationError
 
 from config import MCPSettings
 from graph import mcp_helpers
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
 
-async def query_execute(state: GraphState) -> dict[str, Any]:
+async def query_execute(state: QueryGraphState) -> dict[str, Any]:
     sql = state.query.generated_sql or ""
 
     out: dict[str, Any] = {

@@ -5,10 +5,10 @@ from __future__ import annotations
 from typing import Any
 
 from agents.query_agent import infer_preferences_delta
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 
-async def preferences_infer(state: GraphState) -> dict[str, Any]:
+async def preferences_infer(state: QueryGraphState) -> dict[str, Any]:
     history = state.memory.conversation_history or []
     history_dicts = [t.model_dump(mode="json") for t in history] if history else None
 

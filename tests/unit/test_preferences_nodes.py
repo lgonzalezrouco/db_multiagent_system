@@ -23,7 +23,7 @@ from graph.nodes.query_nodes import (
 from graph.nodes.query_nodes.preferences_hitl import preferences_hitl
 from graph.nodes.query_nodes.preferences_infer import preferences_infer
 from graph.nodes.query_nodes.preferences_persist import preferences_persist
-from graph.state import GraphState, MemoryState
+from graph.state import MemoryState, QueryGraphState
 
 # Import the actual module objects so monkeypatch.setattr can replace
 # module-level names (not the re-exported function references in __init__).
@@ -47,8 +47,8 @@ def _state(
     proposed_delta: dict | None = None,
     rationale: str | None = None,
     user_id: str = "alice",
-) -> GraphState:
-    return GraphState(
+) -> QueryGraphState:
+    return QueryGraphState(
         user_input=user_input,
         user_id=user_id,
         memory=MemoryState(
@@ -114,7 +114,7 @@ async def test_preferences_infer_passes_history_as_dicts(
 
     monkeypatch.setattr(_infer_mod, "infer_preferences_delta", _fake_infer)
 
-    state = GraphState(
+    state = QueryGraphState(
         user_input="test",
         memory=MemoryState(
             preferences={},
@@ -144,7 +144,7 @@ async def test_preferences_infer_passes_none_history_when_empty(
 
     monkeypatch.setattr(_infer_mod, "infer_preferences_delta", _fake_infer)
 
-    state = GraphState(user_input="test", memory=MemoryState(preferences={}))
+    state = QueryGraphState(user_input="test", memory=MemoryState(preferences={}))
     await preferences_infer(state)
 
     assert captured[0] is None

@@ -9,8 +9,8 @@ from graph.memory_nodes import memory_load_user, memory_update_session
 from graph.presence import DbSchemaPresence, SchemaPresenceResult
 from graph.state import (
     ConversationTurn,
-    GraphState,
     MemoryState,
+    QueryGraphState,
     QueryPipelineState,
     SchemaPipelineState,
     append_steps,
@@ -186,7 +186,7 @@ def test_seed_session_fields_preserves_existing_history() -> None:
     from graph.state import ConversationTurn
 
     turn = ConversationTurn(user_input="hello", sql="SELECT 1 LIMIT 1")
-    state = GraphState(memory=MemoryState(conversation_history=[turn]))
+    state = QueryGraphState(memory=MemoryState(conversation_history=[turn]))
 
     delta = seed_session_fields(state)
 
@@ -197,7 +197,7 @@ def test_seed_session_fields_preserves_existing_history() -> None:
 
 def test_seed_session_fields_returns_empty_list_for_no_history() -> None:
     """Seed returns empty history when no prior turns exist."""
-    state = GraphState()
+    state = QueryGraphState()
 
     delta = seed_session_fields(state)
 
@@ -207,7 +207,7 @@ def test_seed_session_fields_returns_empty_list_for_no_history() -> None:
 
 def test_snapshot_session_fields_appends_turn_when_sql_executed() -> None:
     """Snapshot appends a ConversationTurn when SQL was generated."""
-    state = GraphState(
+    state = QueryGraphState(
         user_input="list films",
         query=QueryPipelineState(
             generated_sql="SELECT * FROM film LIMIT 10",
@@ -233,7 +233,7 @@ def test_snapshot_session_fields_appends_turn_when_sql_executed() -> None:
 
 def test_snapshot_session_fields_skips_when_no_sql() -> None:
     """Snapshot does not append a turn when no SQL was generated (schema turns)."""
-    state = GraphState(user_input="describe schema")
+    state = QueryGraphState(user_input="describe schema")
 
     delta = snapshot_session_fields(state)
 
@@ -242,7 +242,7 @@ def test_snapshot_session_fields_skips_when_no_sql() -> None:
 
 def test_snapshot_session_fields_skips_on_last_error() -> None:
     """Snapshot does not append when the turn ended with last_error set."""
-    state = GraphState(
+    state = QueryGraphState(
         user_input="bad query",
         last_error="Critic rejected SQL after max refinement attempts.",
         query=QueryPipelineState(
@@ -258,7 +258,7 @@ def test_snapshot_session_fields_skips_on_last_error() -> None:
 
 def test_snapshot_session_fields_skips_on_failed_execution() -> None:
     """Snapshot does not append when execution_result.success is False."""
-    state = GraphState(
+    state = QueryGraphState(
         user_input="broken query",
         query=QueryPipelineState(
             generated_sql="SELECT * FROM missing_table LIMIT 1",
@@ -279,7 +279,7 @@ def test_snapshot_caps_history_at_max_turns() -> None:
         ConversationTurn(user_input=f"q{i}", sql=f"SELECT {i} LIMIT 1")
         for i in range(HISTORY_MAX_TURNS)
     ]
-    state = GraphState(
+    state = QueryGraphState(
         user_input="new question",
         memory=MemoryState(conversation_history=existing),
         query=QueryPipelineState(
@@ -406,7 +406,7 @@ async def test_memory_load_user_loads_prefs_and_docs(
         lambda settings=None: store_instance_docs,
     )
 
-    state = GraphState(user_id="alice")
+    state = QueryGraphState(user_id="alice")
     result = await memory_load_user(state)
 
     assert result["user_id"] == "alice"
@@ -431,7 +431,7 @@ async def test_memory_load_user_sets_warning_when_no_docs(
         lambda settings=None: _FakeSchemaDocsStore(payload=None),
     )
 
-    state = GraphState()
+    state = QueryGraphState()
     result = await memory_load_user(state)
 
     assert result["query"].get("docs_context") is None
@@ -450,7 +450,7 @@ async def test_memory_load_user_soft_fails_on_prefs_db_error(
         lambda settings=None: _FakeSchemaDocsStore(payload=None),
     )
 
-    state = GraphState()
+    state = QueryGraphState()
     result = await memory_load_user(state)
 
     assert result["memory"]["preferences"] == default_preferences()
@@ -469,7 +469,7 @@ async def test_memory_load_user_soft_fails_on_docs_db_error(
     )
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _ErrorStore)
 
-    state = GraphState()
+    state = QueryGraphState()
     result = await memory_load_user(state)
 
     assert result["memory"].get("preferences") is not None
@@ -485,7 +485,7 @@ async def test_memory_load_user_soft_fails_on_both_db_errors(
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
     monkeypatch.setattr("graph.memory_nodes.SchemaDocsStore", _ErrorStore)
 
-    state = GraphState()
+    state = QueryGraphState()
     result = await memory_load_user(state)
 
     assert result["memory"]["preferences"] == default_preferences()
@@ -498,7 +498,7 @@ async def test_memory_update_session_snapshots_fields(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Session update snapshots SQL into conversation history."""
-    state = GraphState(
+    state = QueryGraphState(
         user_input="list films",
         query=QueryPipelineState(
             generated_sql="SELECT * FROM film LIMIT 5",
@@ -533,7 +533,7 @@ async def test_memory_update_session_upserts_when_dirty(
         lambda settings=None: _CapturingPrefsStore(),
     )
 
-    state = GraphState(
+    state = QueryGraphState(
         user_id="bob",
         memory=MemoryState(
             preferences={"preferred_language": "fr", "row_limit_hint": 20},
@@ -556,7 +556,7 @@ async def test_memory_update_session_skips_upsert_on_db_error(
     """Session update handles DB errors gracefully."""
     monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
 
-    state = GraphState(
+    state = QueryGraphState(
         user_id="carol",
         memory=MemoryState(
             preferences={"row_limit_hint": 5},
@@ -627,10 +627,9 @@ def test_merge_submodel_schema_preserves_unset() -> None:
 
 
 def test_graph_state_defaults() -> None:
-    state = GraphState()
+    state = QueryGraphState()
     assert state.user_input == ""
     assert state.steps == []
-    assert isinstance(state.schema_pipeline, SchemaPipelineState)
     assert isinstance(state.query, QueryPipelineState)
     assert isinstance(state.memory, MemoryState)
 
@@ -665,7 +664,7 @@ def test_trim_rows_returns_empty_for_none_input() -> None:
 
 
 def test_snapshot_includes_row_preview() -> None:
-    state = GraphState(
+    state = QueryGraphState(
         user_input="actors",
         query=QueryPipelineState(
             generated_sql="SELECT * FROM actor LIMIT 5",
@@ -687,7 +686,7 @@ def test_snapshot_includes_row_preview() -> None:
 
 
 def test_snapshot_extracts_row_count() -> None:
-    state = GraphState(
+    state = QueryGraphState(
         user_input="count",
         query=QueryPipelineState(
             generated_sql="SELECT COUNT(*) LIMIT 1",

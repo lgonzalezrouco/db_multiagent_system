@@ -9,7 +9,7 @@ from typing import Any
 import sqlglot
 import sqlglot.expressions as exp
 
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
@@ -28,16 +28,24 @@ def _get_row_limit_hint(preferences: dict | None) -> int:
         return _DEFAULT_LIMIT
 
 
-def enforce_limit(sql: str, limit: int) -> str:
-    """Set or tighten the outer SELECT LIMIT; on parse failure append ``LIMIT n``."""
+def enforce_limit(sql: str, default_limit: int) -> str:
+    """Ensure a safe outer SELECT LIMIT.
+
+    - If there is **no** outer ``LIMIT``, append ``LIMIT default_limit``
+      (from user ``row_limit_hint`` preferences).
+    - If there **is** an outer ``LIMIT``, only **raise** it when it exceeds
+      ``_MAX_ALLOWED_LIMIT`` (safety cap). Otherwise leave it unchanged so
+      explicit counts (e.g. “100 actors”) are not overwritten by the default
+      hint (often 10).
+    """
     try:
         statements = sqlglot.parse(sql, dialect="postgres")
     except sqlglot.errors.ParseError:
         logger.warning("sqlglot_parse_failed_appending_raw_limit", exc_info=True)
-        return _append_raw_limit(sql, limit)
+        return _append_raw_limit(sql, default_limit)
 
     if not statements or statements[0] is None:
-        return _append_raw_limit(sql, limit)
+        return _append_raw_limit(sql, default_limit)
 
     stmt = statements[0]
 
@@ -50,24 +58,40 @@ def enforce_limit(sql: str, limit: int) -> str:
         except (AttributeError, TypeError, ValueError):
             current = None
 
-        if current is not None and current <= limit:
+        if current is None:
+            pass
+        elif current > _MAX_ALLOWED_LIMIT:
+            try:
+                stmt.set(
+                    "limit",
+                    exp.Limit(expression=exp.Literal.number(_MAX_ALLOWED_LIMIT)),
+                )
+                rewritten = stmt.sql(dialect="postgres")
+                logger.info(
+                    "limit_capped_at_max",
+                    extra={"original": current, "new_limit": _MAX_ALLOWED_LIMIT},
+                )
+                return rewritten
+            except Exception:
+                logger.warning(
+                    "sqlglot_limit_cap_failed_appending_raw_limit", exc_info=True
+                )
+                return _append_raw_limit(sql, _MAX_ALLOWED_LIMIT)
+        else:
             return sql
 
     try:
-        stmt.set("limit", exp.Limit(expression=exp.Literal.number(limit)))
+        stmt.set("limit", exp.Limit(expression=exp.Literal.number(default_limit)))
         rewritten = stmt.sql(dialect="postgres")
     except Exception:
         logger.warning(
             "sqlglot_limit_rewrite_failed_appending_raw_limit", exc_info=True
         )
-        return _append_raw_limit(sql, limit)
+        return _append_raw_limit(sql, default_limit)
 
     logger.info(
-        "limit_enforced",
-        extra={
-            "original_limit": getattr(existing_limit_node, "this", None),
-            "new_limit": limit,
-        },
+        "limit_injected",
+        extra={"new_limit": default_limit},
     )
     return rewritten
 
@@ -80,22 +104,26 @@ def _append_raw_limit(sql: str, limit: int) -> str:
     return f"{base} LIMIT {limit}"
 
 
-async def query_enforce_limit(state: GraphState) -> dict[str, Any]:
-    """Apply ``row_limit_hint`` to ``generated_sql`` (best effort)."""
+async def query_enforce_limit(state: QueryGraphState) -> dict[str, Any]:
+    """Add a default LIMIT if missing; cap only above ``_MAX_ALLOWED_LIMIT``."""
     sql = state.query.generated_sql
     if not sql or not sql.strip():
         return {"steps": ["query_enforce_limit"]}
 
-    limit = _get_row_limit_hint(state.memory.preferences)
+    default_limit = _get_row_limit_hint(state.memory.preferences)
 
-    rewritten = enforce_limit(sql, limit)
+    rewritten = enforce_limit(sql, default_limit)
 
     if rewritten == sql:
         return {"steps": ["query_enforce_limit"]}
 
     logger.info(
         "query_limit_rewritten",
-        extra={"limit": limit, "original": sql[:120], "rewritten": rewritten[:120]},
+        extra={
+            "default_limit": default_limit,
+            "original": sql[:120],
+            "rewritten": rewritten[:120],
+        },
     )
     return {
         "steps": ["query_enforce_limit"],

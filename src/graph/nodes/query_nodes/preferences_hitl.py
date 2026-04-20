@@ -6,10 +6,10 @@ from typing import Any
 
 from langgraph.types import interrupt
 
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 
-def preferences_hitl(state: GraphState) -> dict[str, Any]:
+def preferences_hitl(state: QueryGraphState) -> dict[str, Any]:
     hitl_payload: dict[str, Any] = {
         "kind": "preferences_review",
         "current": state.memory.preferences or {},

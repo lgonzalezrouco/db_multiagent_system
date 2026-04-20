@@ -6,7 +6,7 @@ from datetime import date, datetime
 from typing import Any
 
 from agents.query_agent import build_query_explanation
-from graph.state import GraphState
+from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
 
@@ -81,7 +81,7 @@ def _fallback_explanation(
     )
 
 
-async def query_explain(state: GraphState) -> dict[str, Any]:
+async def query_explain(state: QueryGraphState) -> dict[str, Any]:
     err_early = state.last_error
     payload = state.query.execution_result
     sql = state.query.generated_sql or ""

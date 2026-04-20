@@ -8,13 +8,13 @@ from typing import Any
 import psycopg
 
 from config.memory_settings import AppMemorySettings
-from graph.state import GraphState
+from graph.state import QueryGraphState
 from memory.preferences import UserPreferencesStore
 
 logger = logging.getLogger(__name__)
 
 
-async def preferences_persist(state: GraphState) -> dict[str, Any]:
+async def preferences_persist(state: QueryGraphState) -> dict[str, Any]:
     settings = AppMemorySettings()
     user_id = state.user_id or settings.default_user_id
     delta = state.memory.preferences_proposed_delta

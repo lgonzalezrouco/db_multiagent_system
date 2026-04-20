@@ -1,9 +1,11 @@
-"""LangGraph shell: shared state, MCP helpers, compiled graph."""
+"""LangGraph shell: shared state, MCP helpers, compiled graphs."""
 
 from graph.graph import (
-    build_graph,
+    build_query_graph,
+    build_schema_graph,
     build_traceable_config,
-    get_compiled_graph,
+    get_compiled_query_graph,
+    get_compiled_schema_graph,
     graph_run_config,
 )
 from graph.presence import (
@@ -11,15 +13,29 @@ from graph.presence import (
     SchemaPresence,
     SchemaPresenceResult,
 )
-from graph.state import GraphState
+from graph.state import (
+    ConversationTurn,
+    MemoryState,
+    QueryGraphState,
+    QueryPipelineState,
+    SchemaGraphState,
+    SchemaPipelineState,
+)
 
 __all__ = [
+    "ConversationTurn",
     "DbSchemaPresence",
-    "GraphState",
+    "MemoryState",
+    "QueryGraphState",
+    "QueryPipelineState",
+    "SchemaGraphState",
+    "SchemaPipelineState",
     "SchemaPresence",
     "SchemaPresenceResult",
-    "build_graph",
+    "build_query_graph",
+    "build_schema_graph",
     "build_traceable_config",
-    "get_compiled_graph",
+    "get_compiled_query_graph",
+    "get_compiled_schema_graph",
     "graph_run_config",
 ]

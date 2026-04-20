@@ -6,7 +6,9 @@ import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from graph.state import GraphState
+    from graph.state import QueryGraphState, SchemaGraphState
+
+_QUERY_ANSWER_DISPLAY_ROW_CAP = 500
 
 
 def _render_rows_table(
@@ -45,7 +47,11 @@ def _render_rows_json(cols: list[str], rows: list[Any], *, max_rows: int) -> str
     return result
 
 
-def format_query_answer_markdown(payload: dict[str, Any], *, max_rows: int = 50) -> str:
+def format_query_answer_markdown(
+    payload: dict[str, Any],
+    *,
+    max_rows: int = _QUERY_ANSWER_DISPLAY_ROW_CAP,
+) -> str:
     """Render a structured ``query_answer`` payload as markdown.
 
     Respects ``payload["output_format"]``:
@@ -93,6 +99,11 @@ def format_schema_persist_markdown(payload: dict[str, Any]) -> str:
             f"Stored descriptions for **{count}** {word}. {follow}"
         )
     detail = payload.get("message") or payload.get("error")
+    if detail == "rejected by user":
+        return (
+            "**Schema review rejected — nothing was saved.** "
+            "Previously persisted schema documentation (if any) is unchanged."
+        )
     if detail:
         return f"**Schema was not saved.** {detail}"
     return (
@@ -101,10 +112,13 @@ def format_schema_persist_markdown(payload: dict[str, Any]) -> str:
     )
 
 
-def format_turn_state(state: GraphState) -> str:
-    """Format graph ``last_error`` / ``last_result`` for chat display."""
-    err = state.last_error
-    lr = state.last_result
+def _format_last_outputs(
+    *,
+    last_error: str | None,
+    last_result: str | dict | None,
+) -> str:
+    err = last_error
+    lr = last_result
     parts: list[str] = []
     if err:
         parts.append(f"**Error:** {err}")
@@ -123,16 +137,35 @@ def format_turn_state(state: GraphState) -> str:
     return "\n\n".join(parts)
 
 
+def format_turn_state(state: QueryGraphState) -> str:
+    """Format query graph ``last_error`` / ``last_result`` for chat display."""
+    return _format_last_outputs(
+        last_error=state.last_error,
+        last_result=state.last_result,
+    )
+
+
+def format_schema_turn_state(state: SchemaGraphState) -> str:
+    """Format schema graph ``last_error`` / ``last_result`` for the Schema tab."""
+    return _format_last_outputs(
+        last_error=state.last_error,
+        last_result=state.last_result,
+    )
+
+
 def schema_resume_from_inputs(
     *,
     mode: str,
     draft: object,
     edited_json: str,
-) -> tuple[dict[str, Any] | None, str | None]:
-    """Build schema HITL resume dict from form inputs.
+) -> tuple[dict[str, Any] | str | None, str | None]:
+    """Build schema HITL resume from form inputs.
 
-    Returns ``(resume, error_message)`` — ``resume`` is ``None`` when validation fails.
+    Returns ``(resume, error_message)``. On reject, ``resume`` is the
+    string ``reject``; otherwise a dict with a ``tables`` list.
     """
+    if mode == "reject":
+        return "reject", None
     if mode == "approve":
         tables = (draft or {}).get("tables") if isinstance(draft, dict) else None
         if not isinstance(tables, list) or not tables:
