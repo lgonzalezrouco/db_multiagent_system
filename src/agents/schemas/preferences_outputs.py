@@ -18,7 +18,6 @@ _ALLOWED_PREF_KEYS: frozenset[str] = frozenset(_DEFAULTS.keys())
 
 
 def _sanitize_delta_dict(raw: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Same rules as ``agents.query_agent._sanitize_delta`` (canonical keys only)."""
     if not raw:
         return None
     cleaned = {k: v for k, v in raw.items() if k in _ALLOWED_PREF_KEYS}
@@ -26,19 +25,12 @@ def _sanitize_delta_dict(raw: dict[str, Any] | None) -> dict[str, Any] | None:
 
 
 class PreferencesInferenceOutput(BaseModel):
-    """LLM response for preferences inference.
-
-    Uses explicit nullable fields per preference key (no free-form ``dict``).
-    **Every field is required in the JSON schema** (OpenAI strict mode); use JSON
-    ``null`` for "no change" on that preference. ``proposed_delta`` (computed)
-    is the delta dict derived from non-null fields.
-    """
+    """Structured preferences inference; use JSON null per key for “no change”."""
 
     model_config = ConfigDict(extra="ignore")
 
     @classmethod
     def no_change(cls, rationale: str) -> PreferencesInferenceOutput:
-        """All preference fields null (for stubs, soft-fail, and tests)."""
         return cls(
             preferred_language=None,
             output_format=None,
@@ -48,8 +40,6 @@ class PreferencesInferenceOutput(BaseModel):
             rationale=rationale,
         )
 
-    # No defaults: OpenAI ``response_format`` strict JSON schema requires every
-    # property to appear in ``required``; use JSON null for “leave unchanged”.
     preferred_language: str | None = Field(
         description=(
             'New IETF language tag (e.g. "es", "en") when the user signals a '
@@ -84,7 +74,6 @@ class PreferencesInferenceOutput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _unwrap_legacy_proposed_delta(cls, data: Any) -> Any:
-        """Accept legacy JSON with nested ``proposed_delta`` (some providers)."""
         if not isinstance(data, dict):
             return data
         if "proposed_delta" not in data:
@@ -102,7 +91,6 @@ class PreferencesInferenceOutput(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def _ensure_all_properties_present(cls, data: Any) -> Any:
-        """Fill missing keys so partial / legacy payloads validate."""
         if not isinstance(data, dict):
             return data
         for key in _ALLOWED_PREF_KEYS:
@@ -123,7 +111,6 @@ class PreferencesInferenceOutput(BaseModel):
         return self
 
     def _collect_raw_delta(self) -> dict[str, Any]:
-        """Build a delta dict from non-null structured fields."""
         d: dict[str, Any] = {}
         if self.preferred_language is not None and str(self.preferred_language).strip():
             d["preferred_language"] = str(self.preferred_language).strip()
@@ -137,10 +124,8 @@ class PreferencesInferenceOutput(BaseModel):
             d["row_limit_hint"] = self.row_limit_hint
         return d
 
-    @computed_field  # type: ignore[prop-decorator]
-    @property
+    @computed_field
     def proposed_delta(self) -> dict[str, Any] | None:
-        """Subset of preference keys to apply, or None if no field was set."""
         return _sanitize_delta_dict(self._collect_raw_delta())
 
     @classmethod
@@ -150,7 +135,6 @@ class PreferencesInferenceOutput(BaseModel):
         *,
         rationale: str,
     ) -> PreferencesInferenceOutput:
-        """Build an instance from a canonical delta dict (tests and stubs)."""
         d = delta or {}
         return cls(
             preferred_language=d.get("preferred_language"),

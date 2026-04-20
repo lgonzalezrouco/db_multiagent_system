@@ -49,11 +49,6 @@ def mcp_only_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
 
 
-# ---------------------------------------------------------------------------
-# SQL Validation
-# ---------------------------------------------------------------------------
-
-
 def test_validate_sql_requires_limit_clause() -> None:
     """SQL validation rejects queries without LIMIT clause."""
     # Given: a SQL query without LIMIT
@@ -126,11 +121,6 @@ def test_validate_sql_accepts_real_limit_with_limit_in_literal() -> None:
 
     # Then: validation passes
     assert ok is True
-
-
-# ---------------------------------------------------------------------------
-# Graph Compilation and Basic Invocation
-# ---------------------------------------------------------------------------
 
 
 def test_graph_compiles_successfully() -> None:
@@ -273,11 +263,6 @@ async def test_pipeline_clears_last_result_on_tool_error(
     assert state.steps == _QUERY_SUCCESS_STEPS
     assert state.last_error is not None
     assert state.last_result is None
-
-
-# ---------------------------------------------------------------------------
-# Critic Retry Loop
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -575,11 +560,6 @@ async def test_semantic_critic_rejection_triggers_retry(
     assert state.last_error is None
 
 
-# ---------------------------------------------------------------------------
-# Schema Docs and Warnings
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_missing_schema_docs_sets_warning(
     postgres_env: None,
@@ -645,11 +625,6 @@ async def test_missing_schema_docs_sets_warning(
     assert isinstance(lim, str) and warn in lim
 
 
-# ---------------------------------------------------------------------------
-# MCP Error Handling
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_mcp_error_message_propagates_to_last_error(
     postgres_env: None,
@@ -692,11 +667,6 @@ async def test_mcp_error_message_propagates_to_last_error(
     state = unwrap_graph_v2(out)[0]
     assert state.last_error == expected_msg
     assert state.last_result is None
-
-
-# ---------------------------------------------------------------------------
-# Explanation Fallback
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

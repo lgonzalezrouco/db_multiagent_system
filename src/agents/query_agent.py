@@ -1,8 +1,4 @@
-"""Natural-language → plan → SQL via LiteLLM + structured outputs.
-
-Also contains the preferences-inference builder, which shares the same LLM
-factory and message-construction patterns as the query builders.
-"""
+"""Natural-language → plan → SQL via LiteLLM + structured outputs."""
 
 from __future__ import annotations
 
@@ -35,7 +31,6 @@ from memory.preferences import _DEFAULTS as _CANONICAL_KEYS
 
 logger = logging.getLogger(__name__)
 
-# Keys the LLM is allowed to propose changes for.
 ALLOWED_PREF_KEYS: frozenset[str] = frozenset(_CANONICAL_KEYS)
 
 
@@ -55,8 +50,8 @@ def _history_block(conversation_history: list[dict] | None) -> str | None:
     )
 
 
-def _history_summary(conversation_history: list[dict] | None) -> str | None:
-    """Condensed history block (user_input only) to reduce token cost."""
+def _history_summary(conversation_history: list[Any] | None) -> str | None:
+    """Last few user messages only (for the preferences prompt)."""
     if not conversation_history:
         return None
     lines = [
@@ -70,7 +65,6 @@ def _history_summary(conversation_history: list[dict] | None) -> str | None:
 
 
 def _sanitize_delta(raw_delta: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Strip any keys not in the canonical set; return None if nothing remains."""
     if not raw_delta:
         return None
     cleaned = {k: v for k, v in raw_delta.items() if k in ALLOWED_PREF_KEYS}
@@ -243,16 +237,7 @@ async def infer_preferences_delta(
     current_preferences: dict[str, Any] | None = None,
     conversation_history: list[dict] | None = None,
 ) -> PreferencesInferenceOutput:
-    """Detect whether the user intends to change a persistent preference.
-
-    Returns a :class:`PreferencesInferenceOutput` with explicit optional fields
-    per preference key; ``proposed_delta`` is a computed dict of changes (or
-    ``None``). ``rationale`` explains the decision.
-
-    Values are constrained by the schema; ``proposed_delta`` is safe to pass to
-    ``UserPreferencesStore.patch`` after sanitization.
-    Never raises: any LLM error produces a null delta (soft-fail).
-    """
+    """Infer preference changes; on LLM failure returns a no-op via ``no_change``."""
     llm = create_chat_llm()
     structured = llm.with_structured_output(PreferencesInferenceOutput)
 
@@ -283,5 +268,4 @@ async def infer_preferences_delta(
             "Inference call failed; no preference change proposed.",
         )
 
-    # ``proposed_delta`` is computed from explicit structured fields (see schema).
     return result

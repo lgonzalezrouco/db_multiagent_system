@@ -25,10 +25,6 @@ from graph.invoke_v2 import unwrap_graph_v2
 from memory.preferences import default_preferences
 from tests.schema_presence_stubs import ReadySchemaPresence
 
-# ---------------------------------------------------------------------------
-# Shared fakes
-# ---------------------------------------------------------------------------
-
 
 class _FakeTool:
     name = "execute_readonly_sql"
@@ -96,11 +92,6 @@ def _delta_infer(delta: dict) -> Any:
     return _inner
 
 
-# ---------------------------------------------------------------------------
-# 1. No delta → no HITL, turn completes in one shot
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_no_delta_skips_hitl_and_completes(
     postgres_env: None,
@@ -127,11 +118,6 @@ async def test_no_delta_skips_hitl_and_completes(
     assert "preferences_hitl" not in state.steps
     assert "preferences_persist" not in state.steps
     assert state.last_error is None
-
-
-# ---------------------------------------------------------------------------
-# 2. Delta proposed → HITL interrupt fires
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -164,11 +150,6 @@ async def test_delta_proposed_triggers_hitl_interrupt(
     assert payload.get("rationale")
     # Query pipeline must NOT have run yet
     assert "query_plan" not in state.steps
-
-
-# ---------------------------------------------------------------------------
-# 3. Approve → persist → turn completes with updated prefs
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -214,11 +195,6 @@ async def test_hitl_approval_persists_and_completes_turn(
     # Pref was written to the store
     stored = fake_store.get("default")
     assert stored["output_format"] == "json"
-
-
-# ---------------------------------------------------------------------------
-# 4. Reject → prefs unchanged, turn completes
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -271,11 +247,6 @@ async def test_hitl_rejection_leaves_prefs_unchanged(
     assert state.last_error is None
 
 
-# ---------------------------------------------------------------------------
-# 5. Approved row_limit_hint reflected in SQL's LIMIT clause
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_approved_row_limit_hint_enforced_in_sql(
     postgres_env: None,
@@ -326,11 +297,6 @@ async def test_approved_row_limit_hint_enforced_in_sql(
 
     sql = state.query.generated_sql or ""
     assert "LIMIT 3" in sql.upper(), f"Expected LIMIT 3 in SQL, got: {sql!r}"
-
-
-# ---------------------------------------------------------------------------
-# 6. Approved output_format reflected in last_result
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -386,11 +352,6 @@ async def test_approved_output_format_json_reflected_in_last_result(
     assert lr.get("output_format") == "json", (
         f"expected json, got {lr.get('output_format')!r}"
     )
-
-
-# ---------------------------------------------------------------------------
-# 7. Approved safety_strictness=lenient lets the critic pass despite risks
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -460,11 +421,6 @@ async def test_approved_lenient_strictness_passes_critic_with_risks(
     assert state.last_error is None
 
 
-# ---------------------------------------------------------------------------
-# 8. preferences_dirty write-back through memory_update_session
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_preferences_dirty_flag_triggers_upsert_in_update_session(
     monkeypatch: pytest.MonkeyPatch,
@@ -501,11 +457,6 @@ async def test_preferences_dirty_flag_triggers_upsert_in_update_session(
     assert upserted[0]["user_id"] == "alice"
     assert upserted[0]["prefs"]["output_format"] == "json"
     assert result.get("memory", {}).get("preferences_dirty") is False
-
-
-# ---------------------------------------------------------------------------
-# 9. Preferences persist soft-fails on DB error without crashing the turn
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

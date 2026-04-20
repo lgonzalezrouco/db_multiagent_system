@@ -11,10 +11,6 @@ from graph.nodes.query_nodes.query_enforce_limit import (
 )
 from graph.state import GraphState, MemoryState, QueryPipelineState
 
-# ---------------------------------------------------------------------------
-# _get_row_limit_hint
-# ---------------------------------------------------------------------------
-
 
 def test_get_row_limit_hint_returns_default_for_none() -> None:
     assert _get_row_limit_hint(None) == 10
@@ -41,11 +37,6 @@ def test_get_row_limit_hint_handles_missing_key() -> None:
     assert _get_row_limit_hint({"output_format": "json"}) == 10
 
 
-# ---------------------------------------------------------------------------
-# enforce_limit — injection
-# ---------------------------------------------------------------------------
-
-
 def test_enforce_limit_injects_when_no_limit_present() -> None:
     sql = "SELECT * FROM actor"
     result = enforce_limit(sql, 5)
@@ -62,11 +53,6 @@ def test_enforce_limit_injects_on_complex_query() -> None:
     sql = "SELECT f.title FROM film f JOIN film_actor fa ON f.film_id = fa.film_id"
     result = enforce_limit(sql, 7)
     assert "LIMIT 7" in result.upper()
-
-
-# ---------------------------------------------------------------------------
-# enforce_limit — tightening
-# ---------------------------------------------------------------------------
 
 
 def test_enforce_limit_tightens_when_existing_limit_exceeds_hint() -> None:
@@ -94,11 +80,6 @@ def test_enforce_limit_tightens_large_to_small() -> None:
     assert "LIMIT 1" in result.upper()
 
 
-# ---------------------------------------------------------------------------
-# enforce_limit — subquery LIMIT preserved
-# ---------------------------------------------------------------------------
-
-
 def test_enforce_limit_does_not_touch_subquery_limit() -> None:
     """Outermost LIMIT is injected; inner sub-select LIMIT is untouched."""
     sql = "SELECT actor_id FROM (SELECT actor_id FROM actor LIMIT 50) sub"
@@ -107,11 +88,6 @@ def test_enforce_limit_does_not_touch_subquery_limit() -> None:
     assert "LIMIT 10" in result.upper()
     # The inner LIMIT 50 must still be present somewhere in the string
     assert "50" in result
-
-
-# ---------------------------------------------------------------------------
-# enforce_limit — CTE
-# ---------------------------------------------------------------------------
 
 
 def test_enforce_limit_handles_cte() -> None:
@@ -124,11 +100,6 @@ def test_enforce_limit_handles_cte() -> None:
     assert "LIMIT 10" in result.upper()
 
 
-# ---------------------------------------------------------------------------
-# enforce_limit — fallback for unparsable input
-# ---------------------------------------------------------------------------
-
-
 def test_enforce_limit_fallback_appends_limit_on_parse_failure() -> None:
     # Deliberately broken SQL — sqlglot may partially parse it but we test
     # that some LIMIT appears and no exception is raised.
@@ -136,11 +107,6 @@ def test_enforce_limit_fallback_appends_limit_on_parse_failure() -> None:
     result = enforce_limit(sql, 5)
     # Must not raise, and LIMIT should appear (either via rewrite or fallback)
     assert result  # non-empty
-
-
-# ---------------------------------------------------------------------------
-# query_enforce_limit node
-# ---------------------------------------------------------------------------
 
 
 def _make_state(sql: str | None, row_limit_hint: int = 10) -> GraphState:

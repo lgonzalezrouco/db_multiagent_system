@@ -15,10 +15,6 @@ from graph.nodes.query_nodes.query_critic import (
 )
 from graph.state import GraphState, MemoryState, QueryPipelineState
 
-# ---------------------------------------------------------------------------
-# _normalize_safety_strictness
-# ---------------------------------------------------------------------------
-
 
 def test_normalize_returns_normal_for_none_prefs() -> None:
     assert _normalize_safety_strictness(None) == "normal"
@@ -48,10 +44,6 @@ def test_normalize_is_case_insensitive() -> None:
     assert _normalize_safety_strictness({"safety_strictness": "LENIENT"}) == "lenient"
     assert _normalize_safety_strictness({"safety_strictness": "Normal"}) == "normal"
 
-
-# ---------------------------------------------------------------------------
-# _apply_strictness
-# ---------------------------------------------------------------------------
 
 _ACCEPT_NO_RISKS: dict[str, Any] = {
     "verdict": "accept",
@@ -153,10 +145,6 @@ def test_lenient_reject_still_passes() -> None:
     assert r["critic_status"] == "accept"
     assert r.get("refinement_count") is None  # no increment
 
-
-# ---------------------------------------------------------------------------
-# query_critic node — end-to-end with mocked LLM
-# ---------------------------------------------------------------------------
 
 _critic_mod = importlib.import_module("graph.nodes.query_nodes.query_critic")
 

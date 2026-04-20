@@ -24,11 +24,9 @@ from ui.formatters import (
 
 _PENDING_GRAPH_INPUT = "_pending_graph_input"
 
-# Session-state keys for each HITL type
 _SCHEMA_HITL_KEY = "_schema_hitl"
 _PREFS_HITL_KEY = "_prefs_hitl"
 
-# Canonical preference keys + human-readable labels
 _PREF_LABELS: dict[str, str] = {
     "preferred_language": "Preferred language (IETF tag, e.g. en, es, fr)",
     "output_format": "Output format (table | json)",

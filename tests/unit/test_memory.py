@@ -43,11 +43,6 @@ def test_default_preferences_returns_all_canonical_keys() -> None:
     assert prefs["row_limit_hint"] == 10
 
 
-# ---------------------------------------------------------------------------
-# UserPreferencesStore.patch — unit tests using a fake in-process store
-# ---------------------------------------------------------------------------
-
-
 class _InMemoryPrefsDB:
     """Minimal in-memory stand-in for the app_memory Postgres table.
 

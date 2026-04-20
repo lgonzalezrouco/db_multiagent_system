@@ -13,7 +13,6 @@ from psycopg.rows import dict_row
 from config.postgres_settings import PostgresSettings
 from utils.postgres import connect_async
 
-# Kept as a public constant for documentation / external reference.
 FORBIDDEN_TOKENS: frozenset[str] = frozenset(
     {
         "INSERT",
@@ -37,14 +36,7 @@ FORBIDDEN_TOKENS: frozenset[str] = frozenset(
 _MAX_PREVIEW_CHARS = 200
 _ROW_CAP = 1000
 
-# Expression types that are safe as the top-level statement.
-# Everything else (Insert, Update, Delete, Drop, Create, Alter, Grant, Revoke,
-# Copy, Analyze, TruncateTable, Command) is forbidden.
-_SAFE_STMT_TYPES: tuple[type, ...] = (exp.Select,)
-
-# Map sqlglot expression type → canonical forbidden-token name for error messages.
-# exp.Command covers VACUUM, DO, CALL, EXECUTE (sqlglot falls back to Command
-# for statements it can parse but doesn't have a dedicated node for).
+# sqlglot statement type → token label for error messages (Command: VACUUM, DO, …).
 _STMT_TYPE_TO_TOKEN: dict[type, str] = {
     exp.Insert: "INSERT",
     exp.Update: "UPDATE",
@@ -70,16 +62,12 @@ def truncate_sql_preview(sql: str, max_chars: int = _MAX_PREVIEW_CHARS) -> str:
 
 
 def sql_has_limit(sql: str) -> bool:
-    """Return True when the outermost SELECT in *sql* has an AST-level LIMIT clause.
-
-    Tokens inside string literals and comments are invisible to the parser, so
-    ``SELECT 'LIMIT 999' FROM film`` correctly returns False.
-    """
+    """True if the outermost SELECT has a LIMIT (AST-level; not string literals)."""
     try:
         stmts = sqlglot.parse(
             sql, dialect="postgres", error_level=sqlglot.ErrorLevel.WARN
         )
-    except Exception:
+    except sqlglot.errors.ParseError:
         return False
     if not stmts or stmts[0] is None:
         return False
@@ -87,22 +75,7 @@ def sql_has_limit(sql: str) -> bool:
 
 
 def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any]]:
-    """Return ``(ok, error_payload)`` using sqlglot AST analysis.
-
-    Replaces the former hand-rolled comment/literal masking + regex approach.
-    sqlglot parses the SQL into an AST, so tokens that appear only inside string
-    literals, identifiers, or comments are never visible to the safety check.
-
-    Rules enforced:
-    - Non-empty input required.
-    - Exactly one statement (multi-statement → reject).
-    - Top-level statement must be SELECT or a WITH…SELECT (CTE).
-    - Any other statement type (INSERT, UPDATE, DELETE, DROP, CREATE, ALTER,
-      GRANT, REVOKE, COPY, ANALYZE, TRUNCATE, VACUUM, DO, CALL, EXECUTE) → reject.
-
-    On success returns ``(True, {})``.
-    On failure returns ``(False, {success: False, error: {type, message}})``.
-    """
+    """Single read-only SELECT (or WITH…SELECT); one statement; sqlglot-validated."""
     if not sql or not sql.strip():
         return False, {
             "success": False,

@@ -16,10 +16,6 @@ from agents.query_agent import (
 )
 from agents.schemas.preferences_outputs import PreferencesInferenceOutput
 
-# ---------------------------------------------------------------------------
-# Helpers — mirror the pattern used in test_query_agent.py
-# ---------------------------------------------------------------------------
-
 
 def _human_content(captured: list[Any]) -> str:
     for m in captured:
@@ -45,11 +41,6 @@ def _make_capturing_llm(stub_output: Any) -> tuple[MagicMock, list[Any]]:
 
     mock_structured.ainvoke = _ainvoke
     return mock_llm, captured
-
-
-# ---------------------------------------------------------------------------
-# _sanitize_delta
-# ---------------------------------------------------------------------------
 
 
 def test_sanitize_delta_returns_none_for_none() -> None:
@@ -91,11 +82,6 @@ def test_sanitize_delta_all_canonical_keys_are_allowed() -> None:
     assert result == delta
 
 
-# ---------------------------------------------------------------------------
-# _history_summary
-# ---------------------------------------------------------------------------
-
-
 def test_history_summary_returns_none_for_none() -> None:
     assert _history_summary(None) is None
 
@@ -125,15 +111,10 @@ def test_history_summary_caps_at_three_turns() -> None:
 
 
 def test_history_summary_skips_non_dict_entries() -> None:
-    history = [{"user_input": "valid"}, "not a dict", None]  # type: ignore[list-item]
-    result = _history_summary(history)  # type: ignore[arg-type]
+    history: list[Any] = [{"user_input": "valid"}, "not a dict", None]
+    result = _history_summary(history)
     assert result is not None
     assert "valid" in result
-
-
-# ---------------------------------------------------------------------------
-# ALLOWED_PREF_KEYS
-# ---------------------------------------------------------------------------
 
 
 def test_allowed_pref_keys_contains_all_canonical_keys() -> None:
@@ -145,11 +126,6 @@ def test_allowed_pref_keys_contains_all_canonical_keys() -> None:
         "row_limit_hint",
     }
     assert expected <= ALLOWED_PREF_KEYS
-
-
-# ---------------------------------------------------------------------------
-# infer_preferences_delta — message construction
-# ---------------------------------------------------------------------------
 
 
 _NO_CHANGE_STUB = PreferencesInferenceOutput.no_change(
@@ -221,11 +197,6 @@ async def test_infer_omits_history_block_when_none() -> None:
     assert "Recent conversation" not in _human_content(captured)
 
 
-# ---------------------------------------------------------------------------
-# infer_preferences_delta — return value
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_infer_returns_none_delta_when_llm_returns_none() -> None:
     mock_llm, _ = _make_capturing_llm(_NO_CHANGE_STUB)
@@ -254,11 +225,6 @@ async def test_infer_legacy_nested_proposed_delta_unwraps_to_fields() -> None:
     with patch("agents.query_agent.create_chat_llm", return_value=mock_llm):
         result = await infer_preferences_delta("Hablame siempre en español")
     assert result.proposed_delta == {"preferred_language": "es"}
-
-
-# ---------------------------------------------------------------------------
-# infer_preferences_delta — soft-fail on LLM error
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

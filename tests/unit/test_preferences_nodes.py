@@ -31,10 +31,6 @@ _hitl_mod = importlib.import_module("graph.nodes.query_nodes.preferences_hitl")
 _infer_mod = importlib.import_module("graph.nodes.query_nodes.preferences_infer")
 _persist_mod = importlib.import_module("graph.nodes.query_nodes.preferences_persist")
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _async_const(value: Any):
     """Return an async function that always returns *value*."""
@@ -61,11 +57,6 @@ def _state(
             preferences_rationale=rationale,
         ),
     )
-
-
-# ---------------------------------------------------------------------------
-# preferences_infer
-# ---------------------------------------------------------------------------
 
 
 _NO_DELTA = PreferencesInferenceOutput.no_change(
@@ -159,11 +150,6 @@ async def test_preferences_infer_passes_none_history_when_empty(
     assert captured[0] is None
 
 
-# ---------------------------------------------------------------------------
-# preferences_hitl
-# ---------------------------------------------------------------------------
-
-
 def test_preferences_hitl_interrupt_payload_shape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -240,11 +226,6 @@ def test_preferences_hitl_step_recorded(monkeypatch: pytest.MonkeyPatch) -> None
     monkeypatch.setattr(_hitl_mod, "interrupt", lambda _: {"output_format": "json"})
     result = preferences_hitl(_state(proposed_delta={"output_format": "json"}))
     assert "preferences_hitl" in result["steps"]
-
-
-# ---------------------------------------------------------------------------
-# preferences_persist
-# ---------------------------------------------------------------------------
 
 
 class _FakeStore:
@@ -325,11 +306,6 @@ async def test_preferences_persist_soft_fails_on_db_error(
     assert result["memory"]["warning"]
 
 
-# ---------------------------------------------------------------------------
-# route_after_preferences_infer
-# ---------------------------------------------------------------------------
-
-
 def test_route_infer_goes_to_hitl_when_delta_present() -> None:
     state = _state(proposed_delta={"output_format": "json"})
     assert route_after_preferences_infer(state) == "preferences_hitl"
@@ -344,11 +320,6 @@ def test_route_infer_skips_hitl_when_delta_is_empty_dict() -> None:
     # Empty dict is falsy — treated as no delta
     state = _state(proposed_delta={})
     assert route_after_preferences_infer(state) == "query_plan"
-
-
-# ---------------------------------------------------------------------------
-# route_after_preferences_hitl
-# ---------------------------------------------------------------------------
 
 
 def test_route_hitl_goes_to_persist_when_delta_approved() -> None:

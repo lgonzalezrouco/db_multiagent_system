@@ -81,11 +81,6 @@ class _FakeSchemaDocsStore:
         )
 
 
-# ---------------------------------------------------------------------------
-# Schema Presence Gate
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_query_path_runs_when_schema_ready(
     postgres_env: None,
@@ -187,11 +182,6 @@ def test_db_schema_presence_returns_not_ready_with_not_ready_store() -> None:
     # Then: result indicates not ready with reason
     assert result.ready is False
     assert result.reason is not None
-
-
-# ---------------------------------------------------------------------------
-# HITL Interrupt/Resume
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -362,11 +352,6 @@ async def test_inspect_schema_called_once_across_hitl_resume(
 
     # Then: inspection was called exactly once
     assert len(calls) == 1
-
-
-# ---------------------------------------------------------------------------
-# Schema to Query Pivot
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

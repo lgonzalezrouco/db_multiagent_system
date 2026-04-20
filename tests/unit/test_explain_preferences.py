@@ -21,10 +21,6 @@ from ui.formatters import format_query_answer_markdown
 
 _explain_mod = importlib.import_module("graph.nodes.query_nodes.query_explain")
 
-# ---------------------------------------------------------------------------
-# _get_pref
-# ---------------------------------------------------------------------------
-
 
 def test_get_pref_returns_default_for_none() -> None:
     assert _get_pref(None, "output_format", "table") == "table"
@@ -41,11 +37,6 @@ def test_get_pref_falls_back_to_default_for_missing_key() -> None:
 
 def test_get_pref_falls_back_when_value_is_empty_string() -> None:
     assert _get_pref({"output_format": ""}, "output_format", "table") == "table"
-
-
-# ---------------------------------------------------------------------------
-# _format_date_value
-# ---------------------------------------------------------------------------
 
 
 def test_format_date_value_formats_date_object_us() -> None:
@@ -82,11 +73,6 @@ def test_format_date_value_leaves_none_unchanged() -> None:
     assert _format_date_value(None, "%m/%d/%Y") is None
 
 
-# ---------------------------------------------------------------------------
-# _apply_date_format
-# ---------------------------------------------------------------------------
-
-
 def test_apply_date_format_iso_is_noop() -> None:
     rows = [{"d": "2024-01-01"}]
     assert _apply_date_format(rows, "ISO8601") is rows  # same object returned
@@ -116,11 +102,6 @@ def test_apply_date_format_preserves_non_date_values() -> None:
     result = _apply_date_format(rows, "US")
     assert result[0]["n"] == 99
     assert result[0]["s"] == "hello"
-
-
-# ---------------------------------------------------------------------------
-# format_query_answer_markdown — output_format branch
-# ---------------------------------------------------------------------------
 
 
 def _make_payload(
@@ -205,11 +186,6 @@ def test_formatter_explanation_present_in_both_formats() -> None:
     for fmt in ("table", "json"):
         md = format_query_answer_markdown(_make_payload(output_format=fmt))
         assert "Found 2 actors." in md
-
-
-# ---------------------------------------------------------------------------
-# query_explain node — output_format forwarded in last_result
-# ---------------------------------------------------------------------------
 
 
 def _make_state(
@@ -313,11 +289,6 @@ async def test_node_defaults_output_format_to_table(
     state = _make_state(prefs={})
     result = await query_explain(state)
     assert result["last_result"]["output_format"] == "table"
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 
 def _async(value: Any):

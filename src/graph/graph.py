@@ -215,10 +215,6 @@ def get_compiled_graph(
     presence: SchemaPresence | None = None,
     checkpointer: Any | None = None,
 ):
-    """Return a compiled graph with ``MemorySaver`` by default (required for HITL).
-
-    Both ``schema_hitl`` and ``preferences_hitl`` call ``interrupt()`` inside
-    their node body; no ``interrupt_before`` is required.
-    """
+    """Compile with ``MemorySaver`` by default (HITL uses in-node ``interrupt()``)."""
     ckpt = checkpointer if checkpointer is not None else MemorySaver()
     return build_graph(presence=presence).compile(checkpointer=ckpt)

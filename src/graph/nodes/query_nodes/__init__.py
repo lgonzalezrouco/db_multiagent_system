@@ -30,12 +30,10 @@ from .query_refine_cap import query_refine_cap
 
 
 def route_after_preferences_infer(state) -> str:
-    """Skip HITL when no delta was proposed; go straight to query_plan."""
     delta = state.memory.preferences_proposed_delta
     return "preferences_hitl" if delta else "query_plan"
 
 
 def route_after_preferences_hitl(state) -> str:
-    """After HITL: persist if user approved a delta, otherwise skip to query_plan."""
     delta = state.memory.preferences_proposed_delta
     return "preferences_persist" if delta else "query_plan"

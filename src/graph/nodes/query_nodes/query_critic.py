@@ -48,7 +48,6 @@ def _normalize_critic_verdict(raw: Any) -> str:
 
 
 def _normalize_safety_strictness(preferences: Any) -> str:
-    """Return the validated safety_strictness level from preferences."""
     if not isinstance(preferences, dict):
         return "normal"
     raw = str(preferences.get("safety_strictness") or "normal").strip().lower()
@@ -83,32 +82,17 @@ def _apply_strictness(
     strictness: str,
     refinement_count: int,
 ) -> dict[str, Any]:
-    """Translate LLM verdict + strictness level into a critic state update.
-
-    Returns a partial ``query`` state dict with ``critic_status``,
-    ``critic_feedback``, and (when rejecting) ``refinement_count``.
-
-    Strictness semantics
-    --------------------
-    strict  — reject if verdict is "reject" OR if any non-empty risks list is
-              present on an "accept" verdict (risk-aware blocking).
-    normal  — reject only on explicit "reject" verdict (default behaviour).
-    lenient — always accept; annotate critic_feedback with risks as a warning
-              but never block execution.
-    """
     risks: list[str] = [
         str(r).strip() for r in (critique.get("risks") or []) if str(r).strip()
     ]
 
     if strictness == "lenient":
-        # Always pass through; attach risk annotation if any.
         feedback = None
         if risks:
             feedback = "Lenient mode — risks noted: " + "; ".join(risks[:3])
         return {"critic_status": "accept", "critic_feedback": feedback}
 
     if strictness == "strict":
-        # Block on explicit reject OR on any non-empty risks even with accept.
         if verdict == "reject":
             return {
                 "critic_status": "reject",
@@ -126,7 +110,6 @@ def _apply_strictness(
             }
         return {"critic_status": "accept", "critic_feedback": None}
 
-    # normal — block only on explicit reject.
     if verdict == "reject":
         return {
             "critic_status": "reject",

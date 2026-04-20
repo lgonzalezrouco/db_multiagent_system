@@ -2,25 +2,13 @@
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from agents.query_agent import infer_preferences_delta
 from graph.state import GraphState
 
-logger = logging.getLogger(__name__)
-
 
 async def preferences_infer(state: GraphState) -> dict[str, Any]:
-    """Call the preferences-inference LLM and store the proposed delta in state.
-
-    Runs every turn before ``query_plan``. Returns a no-op update when no
-    preference fields are set (computed ``proposed_delta`` is null), so the
-    downstream router skips HITL.
-
-    Never raises: any LLM error produces a null delta (soft-fail inside
-    ``infer_preferences_delta``).
-    """
     history = state.memory.conversation_history or []
     history_dicts = [t.model_dump(mode="json") for t in history] if history else None
 
