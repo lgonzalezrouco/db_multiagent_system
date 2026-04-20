@@ -81,18 +81,15 @@ def postgres_env(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 async def _no_delta_infer(*_a: Any, **_kw: Any) -> PreferencesInferenceOutput:
-    return PreferencesInferenceOutput(
-        proposed_delta=None,
-        rationale="stub: no change detected",
-    )
+    return PreferencesInferenceOutput.no_change("stub: no change detected")
 
 
 def _delta_infer(delta: dict) -> Any:
     """Return an async callable that always proposes *delta*."""
 
     async def _inner(*_a: Any, **_kw: Any) -> PreferencesInferenceOutput:
-        return PreferencesInferenceOutput(
-            proposed_delta=delta,
+        return PreferencesInferenceOutput.from_delta(
+            delta,
             rationale="stub: user requested change",
         )
 
@@ -241,13 +238,14 @@ async def test_hitl_rejection_leaves_prefs_unchanged(
         call_count["n"] += 1
         if call_count["n"] == 1:
             return PreferencesInferenceOutput(
-                proposed_delta={"output_format": "json"},
+                preferred_language=None,
+                output_format="json",
+                date_format=None,
+                safety_strictness=None,
+                row_limit_hint=None,
                 rationale="stub: user requested change",
             )
-        return PreferencesInferenceOutput(
-            proposed_delta=None,
-            rationale="stub: no change",
-        )
+        return PreferencesInferenceOutput.no_change("stub: no change")
 
     monkeypatch.setattr(infer_mod, "infer_preferences_delta", _once_then_noop)
     monkeypatch.setattr(

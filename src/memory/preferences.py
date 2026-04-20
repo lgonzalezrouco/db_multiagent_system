@@ -14,7 +14,7 @@ _DEFAULTS: dict[str, Any] = {
     "preferred_language": "en",
     "output_format": "table",
     "date_format": "ISO8601",
-    "safety_strictness": "strict",
+    "safety_strictness": "normal",
     "row_limit_hint": 10,
 }
 

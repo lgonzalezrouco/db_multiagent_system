@@ -136,9 +136,8 @@ def _stub_create_chat_llm(
             if self.kind == "preferences_infer":
                 # Stub always returns no-op so tests are unaffected by the
                 # preferences inference node running in the query pipeline.
-                return PreferencesInferenceOutput(
-                    proposed_delta=None,
-                    rationale="stub: no preference change detected",
+                return PreferencesInferenceOutput.no_change(
+                    "stub: no preference change detected",
                 )
             raise NotImplementedError(self.kind)
 

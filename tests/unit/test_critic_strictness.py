@@ -20,12 +20,12 @@ from graph.state import GraphState, MemoryState, QueryPipelineState
 # ---------------------------------------------------------------------------
 
 
-def test_normalize_returns_strict_for_none_prefs() -> None:
-    assert _normalize_safety_strictness(None) == "strict"
+def test_normalize_returns_normal_for_none_prefs() -> None:
+    assert _normalize_safety_strictness(None) == "normal"
 
 
-def test_normalize_returns_strict_for_missing_key() -> None:
-    assert _normalize_safety_strictness({"output_format": "json"}) == "strict"
+def test_normalize_returns_normal_for_missing_key() -> None:
+    assert _normalize_safety_strictness({"output_format": "json"}) == "normal"
 
 
 def test_normalize_returns_strict_for_invalid_value() -> None:

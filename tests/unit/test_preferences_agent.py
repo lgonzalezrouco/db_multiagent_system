@@ -152,13 +152,16 @@ def test_allowed_pref_keys_contains_all_canonical_keys() -> None:
 # ---------------------------------------------------------------------------
 
 
-_NO_CHANGE_STUB = PreferencesInferenceOutput(
-    proposed_delta=None,
-    rationale="No persistent preference change detected.",
+_NO_CHANGE_STUB = PreferencesInferenceOutput.no_change(
+    "No persistent preference change detected.",
 )
 
 _CHANGE_STUB = PreferencesInferenceOutput(
-    proposed_delta={"output_format": "json"},
+    preferred_language=None,
+    output_format="json",
+    date_format=None,
+    safety_strictness=None,
+    row_limit_hint=None,
     rationale="User asked to always show results as JSON.",
 )
 
@@ -241,29 +244,16 @@ async def test_infer_returns_sanitized_delta_for_canonical_key() -> None:
 
 
 @pytest.mark.asyncio
-async def test_infer_strips_unknown_keys_from_llm_delta() -> None:
-    """If the LLM hallucinate an unknown key, sanitize removes it."""
-    stub = PreferencesInferenceOutput(
-        proposed_delta={"output_format": "json", "evil_key": "drop tables"},
-        rationale="...",
-    )
+async def test_infer_legacy_nested_proposed_delta_unwraps_to_fields() -> None:
+    """Providers may still return legacy JSON with a nested proposed_delta object."""
+    stub = {
+        "proposed_delta": {"preferred_language": "es"},
+        "rationale": "User wants Spanish.",
+    }
     mock_llm, _ = _make_capturing_llm(stub)
     with patch("agents.query_agent.create_chat_llm", return_value=mock_llm):
-        result = await infer_preferences_delta("test")
-    assert result.proposed_delta == {"output_format": "json"}
-    assert "evil_key" not in (result.proposed_delta or {})
-
-
-@pytest.mark.asyncio
-async def test_infer_returns_none_when_all_llm_keys_are_unknown() -> None:
-    stub = PreferencesInferenceOutput(
-        proposed_delta={"totally_made_up": "value"},
-        rationale="...",
-    )
-    mock_llm, _ = _make_capturing_llm(stub)
-    with patch("agents.query_agent.create_chat_llm", return_value=mock_llm):
-        result = await infer_preferences_delta("test")
-    assert result.proposed_delta is None
+        result = await infer_preferences_delta("Hablame siempre en español")
+    assert result.proposed_delta == {"preferred_language": "es"}
 
 
 # ---------------------------------------------------------------------------

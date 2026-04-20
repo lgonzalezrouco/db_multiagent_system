@@ -491,9 +491,8 @@ async def test_semantic_critic_rejection_triggers_retry(
                     PreferencesInferenceOutput,
                 )
 
-                return PreferencesInferenceOutput(
-                    proposed_delta=None,
-                    rationale="stub: no preference change",
+                return PreferencesInferenceOutput.no_change(
+                    "stub: no preference change",
                 )
             raise NotImplementedError(self.kind)
 
@@ -857,9 +856,8 @@ async def test_second_turn_receives_history_in_llm_prompt(
                     PreferencesInferenceOutput,
                 )
 
-                return PreferencesInferenceOutput(
-                    proposed_delta=None,
-                    rationale="stub: no preference change",
+                return PreferencesInferenceOutput.no_change(
+                    "stub: no preference change",
                 )
             raise NotImplementedError(self.kind)
 

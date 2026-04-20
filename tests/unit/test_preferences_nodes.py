@@ -68,12 +68,15 @@ def _state(
 # ---------------------------------------------------------------------------
 
 
-_NO_DELTA = PreferencesInferenceOutput(
-    proposed_delta=None,
-    rationale="No persistent change detected.",
+_NO_DELTA = PreferencesInferenceOutput.no_change(
+    "No persistent change detected.",
 )
 _WITH_DELTA = PreferencesInferenceOutput(
-    proposed_delta={"output_format": "json"},
+    preferred_language=None,
+    output_format="json",
+    date_format=None,
+    safety_strictness=None,
+    row_limit_hint=None,
     rationale="User asked to always use JSON.",
 )
 

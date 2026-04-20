@@ -245,12 +245,12 @@ async def infer_preferences_delta(
 ) -> PreferencesInferenceOutput:
     """Detect whether the user intends to change a persistent preference.
 
-    Returns a :class:`PreferencesInferenceOutput` with:
-    - ``proposed_delta``: a dict of only the keys to change, or ``None``
-    - ``rationale``: explanation of the decision
+    Returns a :class:`PreferencesInferenceOutput` with explicit optional fields
+    per preference key; ``proposed_delta`` is a computed dict of changes (or
+    ``None``). ``rationale`` explains the decision.
 
-    The delta is sanitized to remove any keys outside the canonical set, so
-    callers can trust the result is safe to pass to ``UserPreferencesStore.patch``.
+    Values are constrained by the schema; ``proposed_delta`` is safe to pass to
+    ``UserPreferencesStore.patch`` after sanitization.
     Never raises: any LLM error produces a null delta (soft-fail).
     """
     llm = create_chat_llm()
@@ -279,24 +279,9 @@ async def infer_preferences_delta(
         result = PreferencesInferenceOutput.model_validate(raw)
     except Exception:
         logger.exception("preferences_inference_failed")
-        return PreferencesInferenceOutput(
-            proposed_delta=None,
-            rationale="Inference call failed; no preference change proposed.",
+        return PreferencesInferenceOutput.no_change(
+            "Inference call failed; no preference change proposed.",
         )
 
-    sanitized = _sanitize_delta(result.proposed_delta)
-    if sanitized != result.proposed_delta:
-        logger.warning(
-            "preferences_delta_contained_unknown_keys",
-            extra={
-                "raw_keys": sorted(result.proposed_delta.keys())
-                if result.proposed_delta
-                else [],
-                "sanitized_keys": sorted(sanitized.keys()) if sanitized else [],
-            },
-        )
-
-    return PreferencesInferenceOutput(
-        proposed_delta=sanitized,
-        rationale=result.rationale,
-    )
+    # ``proposed_delta`` is computed from explicit structured fields (see schema).
+    return result

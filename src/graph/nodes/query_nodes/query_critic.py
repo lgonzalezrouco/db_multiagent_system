@@ -50,8 +50,8 @@ def _normalize_critic_verdict(raw: Any) -> str:
 def _normalize_safety_strictness(preferences: Any) -> str:
     """Return the validated safety_strictness level from preferences."""
     if not isinstance(preferences, dict):
-        return "strict"
-    raw = str(preferences.get("safety_strictness") or "strict").strip().lower()
+        return "normal"
+    raw = str(preferences.get("safety_strictness") or "normal").strip().lower()
     if raw in {"strict", "normal", "lenient"}:
         return raw
     return "strict"
