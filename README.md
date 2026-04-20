@@ -19,8 +19,8 @@ flowchart TB
 
     subgraph LG["LangGraph + MemorySaver"]
         Gate{Schema docs ready?}
-        Schema["Schema pipeline<br/>inspect → draft → HITL → persist"]
-        Query["Query pipeline<br/>plan → SQL → critic → execute"]
+        Schema["Schema path<br/>inspect → draft → HITL → persist"]
+        Query["Query path<br/>prefs → plan → SQL → critic → execute → explain"]
         Gate -->|no| Schema
         Gate -->|yes| Query
     end
@@ -97,11 +97,11 @@ echo "How many customers are there?" | uv run python main.py
 uv run python main.py --no-bootstrap
 ```
 
-On first run (no schema docs persisted yet) the system automatically goes through the **Schema Pipeline**: it inspects the database, drafts descriptions with the LLM, then pauses for your approval before writing anything. After you approve, subsequent runs go straight to the **Query Pipeline**.
+On first run (no schema docs persisted yet) the system automatically follows the **schema path**: it inspects the database, drafts descriptions with the LLM, then pauses for your approval before writing anything. After you approve, subsequent runs go straight to the **query path**.
 
 ### 5. Streamlit UI
 
-The web UI uses the **same** compiled graph, checkpointing, and `graph_run_config` as the CLI, with **`run_kind="streamlit"`** so LangSmith traces can be filtered separately from CLI runs. Schema HITL is handled in the browser (approve or edit JSON) instead of the terminal.
+The web UI uses the **same** compiled graph, checkpointing, and `graph_run_config` as the CLI, with **`run_kind="streamlit"`** so LangSmith traces can be filtered separately from CLI runs. **Schema** HITL and **preferences** HITL are handled in the browser (approve, reject, or edit JSON) instead of the terminal.
 
 ```bash
 uv run streamlit run src/ui/app.py
@@ -129,6 +129,7 @@ Use the same `.env` / Docker setup as above. Optional: set **`DEFAULT_THREAD_ID`
 | `LLM_SERVICE_URL`                                           | LiteLLM proxy root URL                                                          |
 | `LLM_API_KEY`                                               | API key for the LiteLLM proxy                                                   |
 | `LLM_MODEL`                                                 | Model id as routed by LiteLLM                                                   |
+| `LLM_TEMPERATURE` / `LLM_TIMEOUT_SECONDS` / `LLM_MAX_RETRIES` | Sampling, HTTP timeout, and retries for `ChatLiteLLM` (see `.env.example`)   |
 | `QUERY_MAX_REFINEMENTS`                                     | Max critic → SQL retries (default `3`)                                          |
 | `DEFAULT_USER_ID` / `DEFAULT_THREAD_ID`                     | Memory + LangGraph thread defaults                                              |
 | `LANGSMITH_*`                                               | Optional tracing to LangSmith ([Observability](#observability-langsmith) below) |
@@ -150,7 +151,7 @@ uv run python main.py -q "How many actors are there?"
 
 Open your [LangSmith](https://smith.langchain.com/) project (same name as `LANGSMITH_PROJECT`, default `dvdrental-local` in `.env.example`) and inspect the run tree: graph nodes, LLM calls, and MCP tools such as `execute_readonly_sql` nested under the same invocation. Use `LANGSMITH_ENDPOINT` only for EU or self-hosted deployments.
 
-Filter UI vs CLI using trace metadata **`run_kind`** (`streamlit` from Streamlit, `cli` from `main.py`).
+Filter runs using trace metadata **`run_kind`** (`streamlit`, `cli`, or `pytest` depending on entrypoint).
 
 The CLI still emits **errors and warnings** to stderr; LangSmith remains the primary place for full run trees and spans.
 
@@ -166,26 +167,25 @@ The CLI still emits **errors and warnings** to stderr; LangSmith remains the pri
 ├── docker-compose.yml           # postgres (dvdrental), postgres-app-memory, mcp-server
 ├── Dockerfile                   # Image for mcp-server
 ├── TASK.md / AGENTS.md          # Assignment + repo agent rules
-├── data/
-│   └── schema_catalog.json      # Optional exported schema catalog (artifact)
 ├── db/
 │   ├── dvdrental.tar            # DVD Rental dataset archive
 │   └── restore-dvdrental.sh     # Init script mounted into the dvdrental container
 ├── specs/                       # Incremental design notes (spec-driven)
 ├── src/
 │   ├── agents/
-│   │   ├── query_agent.py       # Structured LLM: plan + SQL (QueryPlanOutput, SqlGenerationOutput)
+│   │   ├── query_agent.py       # Structured LLM: plan + SQL + critic (QueryPlanOutput, …)
 │   │   ├── schema_agent.py      # Structured LLM: SchemaDraftOutput
 │   │   ├── prompts/             # Prompt strings (query, schema)
 │   │   └── schemas/             # Pydantic output models
 │   ├── config/                  # pydantic-settings: postgres, app memory, MCP, LLM
 │   ├── graph/
-│   │   ├── graph.py             # StateGraph wiring, MemorySaver, graph_run_config()
+│   │   ├── graph.py             # StateGraph wiring (schema + query paths), MemorySaver, graph_run_config()
 │   │   ├── invoke_v2.py         # unwrap_graph_v2 (CLI + Streamlit, version="v2")
 │   │   ├── state.py             # GraphState
 │   │   ├── presence.py          # DbSchemaPresence — gate on schema_docs
-│   │   ├── schema_pipeline.py   # schema_inspect … schema_persist
-│   │   ├── query_pipeline.py    # query_load_context … query_refine_cap
+│   │   ├── nodes/
+│   │   │   ├── schema_nodes/    # schema_inspect, schema_draft, schema_hitl, schema_persist
+│   │   │   └── query_nodes/     # preferences_*, query_*, query_refine_cap, routing helpers
 │   │   ├── memory_nodes.py      # memory_load_user, memory_update_session
 │   │   └── mcp_helpers.py       # MultiServerMCPClient + tool result helpers
 │   ├── llm/
@@ -201,7 +201,7 @@ The CLI still emits **errors and warnings** to stderr; LangSmith remains the pri
 │   │   ├── readonly_sql.py      # Read-only SQL guard
 │   │   └── schema_metadata.py   # information_schema introspection
 │   ├── ui/
-│   │   ├── app.py               # Streamlit: chat + schema HITL (same graph as main.py)
+│   │   ├── app.py               # Streamlit: chat + schema & preferences HITL (same graph as main.py)
 │   │   └── formatters.py        # Markdown helpers for query answers / errors
 │   └── utils/
 │       └── postgres.py          # Shared psycopg helpers
@@ -218,10 +218,42 @@ First-party imports use top-level package names from `src/` (`config`, `graph`, 
 
 Every run starts with `DbSchemaPresence.check()`, which queries `app_memory.schema_docs` for an approved schema document.
 
-- **Not ready → Schema Pipeline**: the graph inspects the live DB via MCP (`inspect_schema`), asks the LLM to draft human-readable table/column descriptions, then **pauses with `interrupt()`** for your approval. Once you type `approve` (or paste an edited JSON), the approved docs are persisted and the graph ends.
-- **Ready → Query Pipeline**: approved docs are loaded from memory and used as context for every LLM call.
+- **Not ready → schema path** (`schema_inspect` → … → `schema_persist` in [`src/graph/nodes/schema_nodes/`](src/graph/nodes/schema_nodes/)): the graph inspects the live DB via MCP (`inspect_schema`), asks the LLM to draft human-readable table/column descriptions, then **pauses with `interrupt()`** for your approval. Once you type `approve` (or paste an edited JSON), the approved docs are persisted and the graph ends.
+- **Ready → query path**: approved docs are loaded from memory and used as context for every LLM call.
 
-### Query Pipeline
+### Query pipeline
+
+Wiring lives in [`src/graph/graph.py`](src/graph/graph.py) (there is no separate `query_pipeline.py` module).
+
+```mermaid
+flowchart TD
+    ML[memory_load_user]
+    QLC[query_load_context]
+    PINF[preferences_infer]
+    ML --> QLC --> PINF
+    PINF --> D1{delta proposed?}
+    D1 -->|yes| PH[preferences_hitl]
+    D1 -->|no| QP[query_plan]
+    PH --> D2{delta after HITL?}
+    D2 -->|yes, persist| PP[preferences_persist]
+    D2 -->|no, skip persist| QP
+    PP --> QP
+    QGS[query_generate_sql]
+    QEL[query_enforce_limit]
+    QC[query_critic]
+    QP --> QGS --> QEL --> QC
+    QC --> D3{critic routing}
+    D3 -->|accept| QX[query_execute]
+    D3 -->|retry| QGS
+    D3 -->|cap| QRC[query_refine_cap]
+    QX --> QE[query_explain]
+    MUS[memory_update_session]
+    QE --> MUS
+    QRC --> MUS
+    MUS --> graphEnd([END])
+```
+
+`preferences_hitl` pauses with `interrupt()` until you approve or reject the proposed preference delta; routing after resume is reflected in **delta after HITL?**.
 
 1. **`memory_load_user`** — loads user preferences and approved schema docs from the **`app_memory`** Postgres database into state.
 2. **`query_load_context`** — seeds query-specific state fields.
@@ -231,8 +263,8 @@ Every run starts with `DbSchemaPresence.check()`, which queries `app_memory.sche
 6. **`query_plan`** — LLM produces a structured query plan (tables, joins, filters needed).
 7. **`query_generate_sql`** — LLM generates the SQL (informed by plan + schema docs + optional critic feedback).
 8. **`query_enforce_limit`** — uses **sqlglot** to inject or tighten the SQL `LIMIT` to the user's `row_limit_hint` preference.
-9. **`query_critic`** — validates SQL (read-only, LIMIT present) and runs a semantic LLM critique; `safety_strictness` controls the threshold.
-10. **Retry loop** — up to `QUERY_MAX_REFINEMENTS` (default 3) rejections feed critic feedback back to `query_generate_sql`.
+9. **`query_critic`** — validates SQL (read-only, `LIMIT` present) and runs a semantic LLM critique; `safety_strictness` controls how verdicts and risk flags are interpreted.
+10. **Critic routing** — if the critic accepts, go to **`query_execute`**. If it rejects and `refinement_count` is still below **`QUERY_MAX_REFINEMENTS`** (default `3`), loop back to **`query_generate_sql`** with feedback. If the cap is reached, go to **`query_refine_cap`** (sets a user-visible error and skips execution).
 11. **`query_execute`** — sends accepted SQL to the MCP `execute_readonly_sql` tool.
 12. **`query_explain`** — formats the result applying `output_format`, `date_format`, and `preferred_language` preferences.
 13. **`memory_update_session`** — snapshots conversation history and persists any dirty user preferences.
@@ -265,7 +297,7 @@ The system implements **two distinct memory layers**, each with a different scop
 | `preferred_language` | `"en"`      | `query_explain` instructs the LLM to write the explanation in this language                                                                                                                                         |
 | `output_format`      | `"table"`   | `query_explain` sets `last_result["output_format"]`; formatters branch between a markdown pipe table (`"table"`) and a fenced JSON block (`"json"`)                                                                 |
 | `date_format`        | `"ISO8601"` | `query_explain` reformats date/timestamp values in result rows before returning (`"US"` → MM/DD/YYYY, `"EU"` → DD/MM/YYYY)                                                                                          |
-| `safety_strictness`  | `"strict"`  | `query_critic` applies different thresholds: `strict` blocks on any critic risk even with an `accept` verdict; `normal` blocks only on explicit `reject`; `lenient` always passes through with a warning annotation |
+| `safety_strictness`  | `"normal"`  | `query_critic` applies different thresholds: `strict` blocks on any critic risk even with an `accept` verdict; `normal` blocks only on explicit `reject`; `lenient` always passes through with a warning annotation |
 | `row_limit_hint`     | `10`        | `query_enforce_limit` uses sqlglot to inject or tighten the SQL `LIMIT` clause before the critic sees the SQL (clamped 1–500)                                                                                       |
 
 **How preferences change:** the `preferences_infer` node calls the LLM on every query turn to detect persistent preference-change intent in the user's message. If a delta is proposed, `preferences_hitl` pauses the graph with an `interrupt()` for human review. On approval, `preferences_persist` calls `UserPreferencesStore.patch()` — a JSONB `||` merge that updates only the approved keys without wiping others. On rejection (resume with `"reject"`), the proposal is discarded and the query continues with the existing preferences.
@@ -288,12 +320,17 @@ The system implements **two distinct memory layers**, each with a different scop
 
 ## Tests
 
+Pytest markers are defined in `pyproject.toml`: **`integration`** (Postgres / docker), **`litellm_integration`** (needs `LLM_*` and a reachable LiteLLM proxy).
+
 ```bash
 # Full suite (integration tests skip if Postgres is unreachable)
 uv run pytest tests/ -q
 
-# Integration tests only (needs live dvdrental)
+# Integration tests only (needs live dvdrental + app_memory as in README / Compose)
 uv run pytest -m integration -q
+
+# Optional: LLM proxy tests (skipped unless env is configured)
+uv run pytest -m litellm_integration -q
 ```
 
 ---
