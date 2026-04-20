@@ -32,11 +32,6 @@ def _settings_or_skip() -> Settings:
         pytest.skip("Postgres settings missing/invalid (.env not found?)")
 
 
-# ---------------------------------------------------------------------------
-# Graph + MCP HTTP Integration
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 @pytest.mark.integration
 async def test_query_pipeline_via_live_mcp_http(
@@ -100,8 +95,10 @@ async def test_query_pipeline_via_live_mcp_http(
             "memory_load_user",
             "gate:query_path",
             "query_load_context",
+            "preferences_infer",
             "query_plan",
             "query_generate_sql",
+            "query_enforce_limit",
             "query_critic",
             "query_execute",
             "query_explain",
@@ -110,11 +107,6 @@ async def test_query_pipeline_via_live_mcp_http(
     finally:
         server.should_exit = True
         await asyncio.wait_for(task, timeout=10.0)
-
-
-# ---------------------------------------------------------------------------
-# Schema Metadata Integration
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -143,11 +135,6 @@ async def test_inspect_schema_returns_film_table_columns() -> None:
     col_names = {c["name"] for c in tables[0]["columns"]}
     assert "title" in col_names
     assert "film_id" in col_names
-
-
-# ---------------------------------------------------------------------------
-# SQL Execution Integration
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

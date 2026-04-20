@@ -22,8 +22,10 @@ _QUERY_SUCCESS_STEPS = [
     "memory_load_user",
     "gate:query_path",
     "query_load_context",
+    "preferences_infer",
     "query_plan",
     "query_generate_sql",
+    "query_enforce_limit",
     "query_critic",
     "query_execute",
     "query_explain",
@@ -39,8 +41,10 @@ _PIVOT_STEPS = [
     "memory_load_user",
     "gate:query_path",
     "query_load_context",
+    "preferences_infer",
     "query_plan",
     "query_generate_sql",
+    "query_enforce_limit",
     "query_critic",
     "query_execute",
     "query_explain",
@@ -75,11 +79,6 @@ class _FakeSchemaDocsStore:
         _FakeSchemaDocsStore.captured.append(
             {"payload": payload, "fingerprint": metadata_fingerprint}
         )
-
-
-# ---------------------------------------------------------------------------
-# Schema Presence Gate
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -183,11 +182,6 @@ def test_db_schema_presence_returns_not_ready_with_not_ready_store() -> None:
     # Then: result indicates not ready with reason
     assert result.ready is False
     assert result.reason is not None
-
-
-# ---------------------------------------------------------------------------
-# HITL Interrupt/Resume
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -358,11 +352,6 @@ async def test_inspect_schema_called_once_across_hitl_resume(
 
     # Then: inspection was called exactly once
     assert len(calls) == 1
-
-
-# ---------------------------------------------------------------------------
-# Schema to Query Pivot
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio

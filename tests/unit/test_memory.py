@@ -16,7 +16,7 @@ from graph.state import (
     append_steps,
     merge_submodel,
 )
-from memory.preferences import default_preferences
+from memory.preferences import UserPreferencesStore, default_preferences
 from memory.session import (
     HISTORY_MAX_TURNS,
     HISTORY_ROW_VALUE_MAX_CHARS,
@@ -41,6 +41,144 @@ def test_default_preferences_returns_all_canonical_keys() -> None:
     }
     assert prefs["preferred_language"] == "en"
     assert prefs["row_limit_hint"] == 10
+
+
+class _InMemoryPrefsDB:
+    """Minimal in-memory stand-in for the app_memory Postgres table.
+
+    Simulates the JSONB || merge semantics of the real patch() SQL without
+    requiring a live DB connection.
+    """
+
+    def __init__(self) -> None:
+        self._rows: dict[str, dict] = {}
+
+    def get_row(self, user_id: str) -> dict | None:
+        return self._rows.get(user_id)
+
+    def upsert_merge(self, user_id: str, delta: dict) -> dict:
+        existing = self._rows.get(user_id, {})
+        merged = {**existing, **delta}
+        self._rows[user_id] = merged
+        return merged
+
+    def upsert_replace(self, user_id: str, prefs: dict) -> None:
+        self._rows[user_id] = prefs
+
+
+class _PatchablePrefsStore(UserPreferencesStore):
+    """UserPreferencesStore subclass that overrides DB calls with in-memory backend."""
+
+    def __init__(self, db: _InMemoryPrefsDB) -> None:
+        self._db = db
+        # Skip _ensure_table (no real DB)
+
+    def _ensure_table(self) -> None:
+        pass
+
+    def get(self, user_id: str) -> dict:
+        row = self._db.get_row(user_id)
+        if row is None:
+            return default_preferences()
+        return {**default_preferences(), **row}
+
+    def upsert(self, user_id: str, prefs: dict) -> None:
+        self._db.upsert_replace(user_id, prefs)
+
+    def patch(self, user_id: str, delta: dict) -> dict:
+        merged_stored = self._db.upsert_merge(user_id, delta)
+        return {**default_preferences(), **merged_stored}
+
+
+def _make_store() -> tuple[_PatchablePrefsStore, _InMemoryPrefsDB]:
+    db = _InMemoryPrefsDB()
+    return _PatchablePrefsStore(db), db
+
+
+def test_patch_new_user_inserts_delta_merged_with_defaults() -> None:
+    """patch() on a new user inserts the delta and returns defaults + delta."""
+    store, _ = _make_store()
+    result = store.patch("alice", {"row_limit_hint": 5})
+
+    assert result["row_limit_hint"] == 5
+    # Unspecified keys should be defaults
+    assert result["output_format"] == "table"
+    assert result["preferred_language"] == "en"
+
+
+def test_patch_existing_user_merges_without_wiping_other_keys() -> None:
+    """patch() preserves keys not present in the delta."""
+    store, _ = _make_store()
+    # Seed with two non-default values
+    store.upsert(
+        "bob", {**default_preferences(), "row_limit_hint": 25, "output_format": "json"}
+    )
+    result = store.patch("bob", {"preferred_language": "fr"})
+
+    # Patched key updated
+    assert result["preferred_language"] == "fr"
+    # Non-patched stored keys preserved
+    assert result["row_limit_hint"] == 25
+    assert result["output_format"] == "json"
+
+
+def test_patch_overwrites_targeted_key_only() -> None:
+    """patch() changes only the key(s) in delta; others unchanged."""
+    store, db = _make_store()
+    store.upsert("carol", {**default_preferences(), "safety_strictness": "lenient"})
+    result = store.patch("carol", {"safety_strictness": "strict"})
+
+    assert result["safety_strictness"] == "strict"
+    # Other defaults still present
+    assert result["row_limit_hint"] == default_preferences()["row_limit_hint"]
+
+
+def test_patch_returns_full_prefs_with_defaults_for_missing_keys() -> None:
+    """patch() return value always contains all canonical default keys."""
+    store, _ = _make_store()
+    result = store.patch("dave", {"date_format": "US"})
+
+    for key in default_preferences():
+        assert key in result, f"Missing key: {key}"
+
+
+def test_patch_multiple_keys_in_single_call() -> None:
+    """patch() accepts a delta with multiple keys and applies all of them."""
+    store, _ = _make_store()
+    result = store.patch(
+        "eve", {"row_limit_hint": 3, "output_format": "json", "date_format": "EU"}
+    )
+
+    assert result["row_limit_hint"] == 3
+    assert result["output_format"] == "json"
+    assert result["date_format"] == "EU"
+    # Untouched key stays at default
+    assert result["safety_strictness"] == default_preferences()["safety_strictness"]
+
+
+def test_patch_successive_calls_accumulate_correctly() -> None:
+    """Two successive patch() calls accumulate without losing earlier changes."""
+    store, _ = _make_store()
+    store.patch("frank", {"row_limit_hint": 7})
+    result = store.patch("frank", {"output_format": "json"})
+
+    # First patch persisted
+    assert result["row_limit_hint"] == 7
+    # Second patch applied
+    assert result["output_format"] == "json"
+
+
+def test_upsert_full_replace_does_not_preserve_old_keys() -> None:
+    """upsert() (full replace) wipes keys not present in the new prefs dict."""
+    store, db = _make_store()
+    store.upsert("grace", {**default_preferences(), "row_limit_hint": 99})
+    # Full replace with a smaller dict (no row_limit_hint key)
+    store.upsert("grace", {"preferred_language": "de"})
+    row = db.get_row("grace")
+
+    # row_limit_hint was wiped (not in new dict)
+    assert "row_limit_hint" not in row
+    assert row["preferred_language"] == "de"
 
 
 def test_seed_session_fields_preserves_existing_history() -> None:

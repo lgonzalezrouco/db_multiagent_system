@@ -9,31 +9,63 @@ if TYPE_CHECKING:
     from graph.state import GraphState
 
 
+def _render_rows_table(
+    cols: list[str],
+    rows: list[Any],
+    *,
+    max_rows: int,
+) -> str:
+    """Render columns + rows as a markdown table string."""
+    if not cols:
+        return "_No columns returned._"
+    display_rows = rows[:max_rows]
+    header = " | ".join(c.replace("|", "\\|") for c in cols)
+    sep = " | ".join("---" for _ in cols)
+    lines = [f"| {header} |", f"| {sep} |"]
+    for row in display_rows:
+        cells = []
+        for c in cols:
+            v = row.get(c, "") if isinstance(row, dict) else ""
+            s = str(v).replace("|", "\\|").replace("\n", " ")
+            cells.append(s)
+        lines.append(f"| {' | '.join(cells)} |")
+    result = "\n".join(lines)
+    if len(rows) > max_rows:
+        result += f"\n\n_Showing first {max_rows} of {len(rows)} rows._"
+    return result
+
+
+def _render_rows_json(cols: list[str], rows: list[Any], *, max_rows: int) -> str:
+    """Render columns + rows as a fenced JSON code block."""
+    display_rows = rows[:max_rows]
+    blob = json.dumps(display_rows, indent=2, ensure_ascii=False, default=str)
+    result = f"```json\n{blob}\n```"
+    if len(rows) > max_rows:
+        result += f"\n\n_Showing first {max_rows} of {len(rows)} rows._"
+    return result
+
+
 def format_query_answer_markdown(payload: dict[str, Any], *, max_rows: int = 50) -> str:
-    """Render a structured ``query_answer`` payload as markdown."""
+    """Render a structured ``query_answer`` payload as markdown.
+
+    Respects ``payload["output_format"]``:
+    - ``"table"`` (default) — markdown table
+    - ``"json"`` — fenced JSON code block
+    """
     parts: list[str] = []
     sql = payload.get("sql") or ""
     parts.append("**SQL**")
     parts.append(f"```sql\n{sql}\n```")
+
     cols = list(payload.get("columns") or [])
     rows = list(payload.get("rows") or [])
-    if not cols:
-        parts.append("_No columns returned._")
+    output_format = str(payload.get("output_format") or "table").strip().lower()
+
+    if output_format == "json":
+        parts.append(_render_rows_json(cols, rows, max_rows=max_rows))
     else:
-        display_rows = rows[:max_rows]
-        header = " | ".join(c.replace("|", "\\|") for c in cols)
-        sep = " | ".join("---" for _ in cols)
-        lines = [f"| {header} |", f"| {sep} |"]
-        for row in display_rows:
-            cells = []
-            for c in cols:
-                v = row.get(c, "") if isinstance(row, dict) else ""
-                s = str(v).replace("|", "\\|").replace("\n", " ")
-                cells.append(s)
-            lines.append(f"| {' | '.join(cells)} |")
-        parts.append("\n".join(lines))
-        if len(rows) > max_rows:
-            parts.append(f"_Showing first {max_rows} of {len(rows)} rows._")
+        parts.append(_render_rows_table(cols, rows, max_rows=max_rows))
+
     expl = payload.get("explanation")
     if expl:
         parts.append(f"**Explanation**\n\n{expl}")

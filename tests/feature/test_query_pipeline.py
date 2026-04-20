@@ -17,8 +17,10 @@ _QUERY_SUCCESS_STEPS = [
     "memory_load_user",
     "gate:query_path",
     "query_load_context",
+    "preferences_infer",
     "query_plan",
     "query_generate_sql",
+    "query_enforce_limit",
     "query_critic",
     "query_execute",
     "query_explain",
@@ -45,11 +47,6 @@ def mcp_only_env(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("POSTGRES_PASSWORD", raising=False)
     monkeypatch.delenv("POSTGRES_DB", raising=False)
     monkeypatch.setenv("MCP_SERVER_URL", "http://127.0.0.1:8000/mcp")
-
-
-# ---------------------------------------------------------------------------
-# SQL Validation
-# ---------------------------------------------------------------------------
 
 
 def test_validate_sql_requires_limit_clause() -> None:
@@ -124,11 +121,6 @@ def test_validate_sql_accepts_real_limit_with_limit_in_literal() -> None:
 
     # Then: validation passes
     assert ok is True
-
-
-# ---------------------------------------------------------------------------
-# Graph Compilation and Basic Invocation
-# ---------------------------------------------------------------------------
 
 
 def test_graph_compiles_successfully() -> None:
@@ -273,11 +265,6 @@ async def test_pipeline_clears_last_result_on_tool_error(
     assert state.last_result is None
 
 
-# ---------------------------------------------------------------------------
-# Critic Retry Loop
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_critic_retry_then_success(
     postgres_env: None,
@@ -315,7 +302,9 @@ async def test_critic_retry_then_success(
     ) -> str:
         calls.append(rc)
         if rc == 0:
-            return "SELECT COUNT(*) FROM public.actor"
+            # Missing LIMIT: query_enforce_limit will inject one, but
+            # using a forbidden token ensures structural rejection regardless.
+            return "DELETE FROM public.actor"
         return "SELECT COUNT(*)::bigint AS n FROM public.actor LIMIT 10"
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
@@ -338,10 +327,13 @@ async def test_critic_retry_then_success(
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
+        "preferences_infer",
         "query_plan",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_execute",
         "query_explain",
@@ -383,7 +375,8 @@ async def test_refinement_cap_prevents_infinite_retry(
         _rc: int,
         **_kw: Any,
     ) -> str:
-        return "SELECT 1"
+        # Forbidden token — structural check rejects this even after enforce_limit.
+        return "DROP TABLE public.actor"
 
     monkeypatch.setattr("graph.mcp_helpers.get_mcp_client", _fake_client)
     query_gen_mod = importlib.import_module(
@@ -405,12 +398,16 @@ async def test_refinement_cap_prevents_infinite_retry(
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
+        "preferences_infer",
         "query_plan",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_refine_cap",
         "memory_update_session",
@@ -474,6 +471,14 @@ async def test_semantic_critic_rejection_triggers_retry(
                     limitations="Preview only; results may be truncated by LIMIT.",
                     follow_up_suggestions=[],
                 )
+            if self.kind == "preferences_infer":
+                from agents.schemas.preferences_outputs import (
+                    PreferencesInferenceOutput,
+                )
+
+                return PreferencesInferenceOutput.no_change(
+                    "stub: no preference change",
+                )
             raise NotImplementedError(self.kind)
 
     class _FakeChatLiteLLM:
@@ -482,6 +487,7 @@ async def test_semantic_critic_rejection_triggers_retry(
             mapping = {
                 "QueryCritiqueOutput": "critique",
                 "QueryExplanationOutput": "explain",
+                "PreferencesInferenceOutput": "preferences_infer",
             }
             if name not in mapping:
                 raise NotImplementedError(name)
@@ -533,10 +539,13 @@ async def test_semantic_critic_rejection_triggers_retry(
         "memory_load_user",
         "gate:query_path",
         "query_load_context",
+        "preferences_infer",
         "query_plan",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_generate_sql",
+        "query_enforce_limit",
         "query_critic",
         "query_execute",
         "query_explain",
@@ -549,11 +558,6 @@ async def test_semantic_critic_rejection_triggers_retry(
     assert isinstance(lr, dict)
     assert lr.get("sql") == "SELECT COUNT(*)::bigint AS n FROM public.rental LIMIT 10"
     assert state.last_error is None
-
-
-# ---------------------------------------------------------------------------
-# Schema Docs and Warnings
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -621,11 +625,6 @@ async def test_missing_schema_docs_sets_warning(
     assert isinstance(lim, str) and warn in lim
 
 
-# ---------------------------------------------------------------------------
-# MCP Error Handling
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.asyncio
 async def test_mcp_error_message_propagates_to_last_error(
     postgres_env: None,
@@ -668,11 +667,6 @@ async def test_mcp_error_message_propagates_to_last_error(
     state = unwrap_graph_v2(out)[0]
     assert state.last_error == expected_msg
     assert state.last_result is None
-
-
-# ---------------------------------------------------------------------------
-# Explanation Fallback
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
@@ -827,6 +821,14 @@ async def test_second_turn_receives_history_in_llm_prompt(
                 return QueryCritiqueOutput(
                     verdict="accept", feedback="ok", risks=[], assumptions=[]
                 )
+            if self.kind == "preferences_infer":
+                from agents.schemas.preferences_outputs import (
+                    PreferencesInferenceOutput,
+                )
+
+                return PreferencesInferenceOutput.no_change(
+                    "stub: no preference change",
+                )
             raise NotImplementedError(self.kind)
 
     class _CapturingLLM:
@@ -835,6 +837,7 @@ async def test_second_turn_receives_history_in_llm_prompt(
                 "QueryPlanOutput": "plan",
                 "SqlGenerationOutput": "sql",
                 "QueryCritiqueOutput": "critique",
+                "PreferencesInferenceOutput": "preferences_infer",
             }
             name = getattr(schema, "__name__", "")
             if name not in mapping:

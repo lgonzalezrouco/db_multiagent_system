@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import json
-import re
 from typing import Any
 
 import psycopg
+import sqlglot
+import sqlglot.expressions as exp
 from psycopg.rows import dict_row
 
 from config.postgres_settings import PostgresSettings
@@ -35,8 +36,20 @@ FORBIDDEN_TOKENS: frozenset[str] = frozenset(
 _MAX_PREVIEW_CHARS = 200
 _ROW_CAP = 1000
 
-_TOKEN_RE = {
-    tok: re.compile(rf"\b{re.escape(tok)}\b", re.IGNORECASE) for tok in FORBIDDEN_TOKENS
+# sqlglot statement type → token label for error messages (Command: VACUUM, DO, …).
+_STMT_TYPE_TO_TOKEN: dict[type, str] = {
+    exp.Insert: "INSERT",
+    exp.Update: "UPDATE",
+    exp.Delete: "DELETE",
+    exp.TruncateTable: "TRUNCATE",
+    exp.Drop: "DROP",
+    exp.Alter: "ALTER",
+    exp.Create: "CREATE",
+    exp.Grant: "GRANT",
+    exp.Revoke: "REVOKE",
+    exp.Copy: "COPY",
+    exp.Analyze: "ANALYZE",
+    exp.Command: "non-SELECT command",
 }
 
 
@@ -48,76 +61,21 @@ def truncate_sql_preview(sql: str, max_chars: int = _MAX_PREVIEW_CHARS) -> str:
     return s[:max_chars] + "[... truncated]"
 
 
-def _mask_sql(sql: str) -> str:
-    """Mask comments and literals so ';' and tokens are analyzed safely."""
-    out: list[str] = []
-    i = 0
-    n = len(sql)
-    while i < n:
-        if i + 1 < n and sql[i : i + 2] == "--":
-            while i < n and sql[i] != "\n":
-                out.append(" ")
-                i += 1
-            continue
-        if i + 1 < n and sql[i : i + 2] == "/*":
-            out.append(" ")
-            i += 2
-            while i + 1 < n and sql[i : i + 2] != "*/":
-                out.append(" ")
-                i += 1
-            i = min(i + 2, n)
-            continue
-
-        c = sql[i]
-        if c == "'":
-            out.append(" ")
-            i += 1
-            while i < n:
-                if sql[i] == "'" and i + 1 < n and sql[i + 1] == "'":
-                    i += 2
-                    continue
-                if sql[i] == "'":
-                    i += 1
-                    break
-                i += 1
-            continue
-
-        if c == '"':
-            out.append(" ")
-            i += 1
-            while i < n and sql[i] != '"':
-                i += 1
-            i += 1
-            continue
-
-        if c == "$" and i + 1 < n:
-            j = i + 1
-            while j < n and sql[j] != "$":
-                j += 1
-            if j < n:
-                tag = sql[i : j + 1]
-                end = sql.find(tag, j + 1)
-                if end != -1:
-                    out.append(" " * (end + len(tag) - i))
-                    i = end + len(tag)
-                    continue
-
-        out.append(c)
-        i += 1
-
-    return "".join(out)
-
-
-def mask_sql_for_analysis(sql: str) -> str:
-    """Blank comments and literals so callers can inspect SQL structure (e.g. LIMIT)."""
-    return _mask_sql(sql)
+def sql_has_limit(sql: str) -> bool:
+    """True if the outermost SELECT has a LIMIT (AST-level; not string literals)."""
+    try:
+        stmts = sqlglot.parse(
+            sql, dialect="postgres", error_level=sqlglot.ErrorLevel.WARN
+        )
+    except sqlglot.errors.ParseError:
+        return False
+    if not stmts or stmts[0] is None:
+        return False
+    return stmts[0].args.get("limit") is not None
 
 
 def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any]]:
-    """
-    Return (ok, error_payload) where error_payload matches spec error JSON
-    (top-level success=false). On success, returns empty dict.
-    """
+    """Single read-only SELECT (or WITH…SELECT); one statement; sqlglot-validated."""
     if not sql or not sql.strip():
         return False, {
             "success": False,
@@ -127,10 +85,32 @@ def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any]]:
             },
         }
 
-    masked = _mask_sql(sql)
-    stripped_parts = [p.strip() for p in masked.split(";")]
-    non_empty = [p for p in stripped_parts if p]
-    if len(non_empty) > 1:
+    try:
+        stmts = sqlglot.parse(
+            sql, dialect="postgres", error_level=sqlglot.ErrorLevel.WARN
+        )
+    except sqlglot.errors.ParseError as exc:
+        return False, {
+            "success": False,
+            "error": {
+                "type": "validation_error",
+                "message": f"SQL could not be parsed: {exc}",
+            },
+        }
+
+    # Filter out None entries (sqlglot may produce them for trailing semicolons).
+    stmts = [s for s in stmts if s is not None]
+
+    if not stmts:
+        return False, {
+            "success": False,
+            "error": {
+                "type": "validation_error",
+                "message": "SQL must be a non-empty string.",
+            },
+        }
+
+    if len(stmts) > 1:
         return False, {
             "success": False,
             "error": {
@@ -142,18 +122,27 @@ def validate_readonly_sql(sql: str) -> tuple[bool, dict[str, Any]]:
             },
         }
 
-    check_text = non_empty[0] if non_empty else ""
-    for token in FORBIDDEN_TOKENS:
-        if _TOKEN_RE[token].search(check_text):
-            return False, {
-                "success": False,
-                "error": {
-                    "type": "validation_error",
-                    "message": f"Query contains forbidden token: {token}",
-                },
-            }
+    stmt = stmts[0]
 
-    return True, {}
+    # A CTE (WITH … SELECT) is parsed as a Select with a "with" arg.
+    if isinstance(stmt, exp.Select):
+        return True, {}
+
+    # Identify the forbidden token for a helpful error message.
+    token_name = _STMT_TYPE_TO_TOKEN.get(type(stmt), type(stmt).__name__)
+    # For Command nodes, try to extract the first word for a cleaner message.
+    if isinstance(stmt, exp.Command):
+        first_word = str(stmt.this or "").split()[0].upper() if stmt.this else ""
+        if first_word in FORBIDDEN_TOKENS:
+            token_name = first_word
+
+    return False, {
+        "success": False,
+        "error": {
+            "type": "validation_error",
+            "message": f"Query contains forbidden token: {token_name}",
+        },
+    }
 
 
 async def execute_readonly_sql(

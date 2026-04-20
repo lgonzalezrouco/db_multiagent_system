@@ -16,6 +16,7 @@ from langchain_core.messages import BaseMessage
 from pytest import Config
 
 from agents.prompts.schema import INSPECT_METADATA_SENTINEL
+from agents.schemas.preferences_outputs import PreferencesInferenceOutput
 from agents.schemas.query_outputs import (
     QueryCritiqueOutput,
     QueryExplanationOutput,
@@ -132,6 +133,12 @@ def _stub_create_chat_llm(
                     ),
                     follow_up_suggestions=[],
                 )
+            if self.kind == "preferences_infer":
+                # Stub always returns no-op so tests are unaffected by the
+                # preferences inference node running in the query pipeline.
+                return PreferencesInferenceOutput.no_change(
+                    "stub: no preference change detected",
+                )
             raise NotImplementedError(self.kind)
 
     class _FakeChatLiteLLM:
@@ -143,6 +150,7 @@ def _stub_create_chat_llm(
                 "SchemaDraftOutput": "schema",
                 "QueryCritiqueOutput": "critique",
                 "QueryExplanationOutput": "explain",
+                "PreferencesInferenceOutput": "preferences_infer",
             }
             if name not in mapping:
                 raise NotImplementedError(name)

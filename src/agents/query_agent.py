@@ -8,6 +8,10 @@ from typing import Any
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from agents.prompts.preferences import (
+    PREFERENCES_INFERENCE_INSTRUCTIONS,
+    PREFERENCES_SYSTEM_MESSAGE,
+)
 from agents.prompts.query import (
     QUERY_CRITIC_INSTRUCTIONS,
     QUERY_EXPLAIN_INSTRUCTIONS,
@@ -15,6 +19,7 @@ from agents.prompts.query import (
     QUERY_SQL_INSTRUCTIONS,
     QUERY_SYSTEM_MESSAGE,
 )
+from agents.schemas.preferences_outputs import PreferencesInferenceOutput
 from agents.schemas.query_outputs import (
     QueryCritiqueOutput,
     QueryExplanationOutput,
@@ -22,8 +27,11 @@ from agents.schemas.query_outputs import (
     SqlGenerationOutput,
 )
 from llm.factory import create_chat_llm
+from memory.preferences import _DEFAULTS as _CANONICAL_KEYS
 
 logger = logging.getLogger(__name__)
+
+ALLOWED_PREF_KEYS: frozenset[str] = frozenset(_CANONICAL_KEYS)
 
 
 def _compact_json(data: Any, *, max_chars: int = 12000) -> str:
@@ -40,6 +48,27 @@ def _history_block(conversation_history: list[dict] | None) -> str | None:
     return "Conversation history (JSON, oldest-first):\n" + _compact_json(
         conversation_history
     )
+
+
+def _history_summary(conversation_history: list[Any] | None) -> str | None:
+    """Last few user messages only (for the preferences prompt)."""
+    if not conversation_history:
+        return None
+    lines = [
+        f"- {turn.get('user_input', '')}"
+        for turn in conversation_history[-3:]
+        if isinstance(turn, dict)
+    ]
+    if not lines:
+        return None
+    return "Recent conversation context (user messages only):\n" + "\n".join(lines)
+
+
+def _sanitize_delta(raw_delta: dict[str, Any] | None) -> dict[str, Any] | None:
+    if not raw_delta:
+        return None
+    cleaned = {k: v for k, v in raw_delta.items() if k in ALLOWED_PREF_KEYS}
+    return cleaned if cleaned else None
 
 
 async def build_query_plan(
@@ -200,3 +229,43 @@ async def build_query_explanation(
     raw = await structured.ainvoke(messages)
     result = QueryExplanationOutput.model_validate(raw)
     return result.model_dump(mode="json")
+
+
+async def infer_preferences_delta(
+    user_input: str,
+    *,
+    current_preferences: dict[str, Any] | None = None,
+    conversation_history: list[dict] | None = None,
+) -> PreferencesInferenceOutput:
+    """Infer preference changes; on LLM failure returns a no-op via ``no_change``."""
+    llm = create_chat_llm()
+    structured = llm.with_structured_output(PreferencesInferenceOutput)
+
+    human_parts = [
+        PREFERENCES_INFERENCE_INSTRUCTIONS,
+        f"User message:\n{(user_input or '').strip() or '(empty)'}",
+    ]
+    if current_preferences is not None:
+        human_parts.append(
+            "Current preferences (JSON):\n"
+            + _compact_json(current_preferences, max_chars=4000),
+        )
+    history_str = _history_summary(conversation_history)
+    if history_str:
+        human_parts.append(history_str)
+
+    messages = [
+        SystemMessage(content=PREFERENCES_SYSTEM_MESSAGE),
+        HumanMessage(content="\n\n".join(human_parts)),
+    ]
+
+    try:
+        raw = await structured.ainvoke(messages)
+        result = PreferencesInferenceOutput.model_validate(raw)
+    except Exception:
+        logger.exception("preferences_inference_failed")
+        return PreferencesInferenceOutput.no_change(
+            "Inference call failed; no preference change proposed.",
+        )
+
+    return result

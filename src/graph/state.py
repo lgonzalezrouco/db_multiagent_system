@@ -65,6 +65,8 @@ class MemoryState(BaseModel):
 
     preferences: dict | None = None
     preferences_dirty: bool = False
+    preferences_proposed_delta: dict | None = None
+    preferences_rationale: str | None = None
     conversation_history: list[ConversationTurn] = Field(default_factory=list)
     warning: str | None = None
 

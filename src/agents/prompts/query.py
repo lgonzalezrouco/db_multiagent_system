@@ -33,6 +33,11 @@ QUERY_PLAN_INSTRUCTIONS = """Produce a concise query plan as structured output.
 Ground the plan in the user question and any schema documentation context provided.
 If a Conversation history block is present, resolve any anaphoric references
 before planning.
+
+**Compound user messages:** The same message may mix (a) meta instructions about
+how the assistant should behave (language, output format, limits, strictness) and
+(b) a concrete data question. Plan **only** the database retrieval part (b).
+Ignore (a) for table/column/join choices; user preferences are applied elsewhere.
 """
 
 QUERY_SQL_INSTRUCTIONS = """Generate exactly one PostgreSQL SELECT for the dvdrental
@@ -42,6 +47,15 @@ The statement must include a LIMIT clause. Read-only only
 (no INSERT/UPDATE/DELETE/etc.).
 If a Conversation history block is present, resolve any anaphoric references
 before generating SQL.
+
+If the user message mixes preference/meta instructions with a data question,
+generate SQL only for the data question.
+
+Ordering: when the user asks for the "first", "top", "earliest", "latest",
+"primeros", "últimos", or similar superlatives / ordered subsets, add an
+explicit ORDER BY (for a stable "first N" by primary key, order by that key;
+for names or dates, order by the column that matches the intent). Do not rely
+on implicit row order.
 """
 
 QUERY_CRITIC_INSTRUCTIONS = """Review the generated SQL against the user question as a
@@ -56,8 +70,13 @@ Rules:
   LIMIT requirements.
 - Reject SQL that answers a different question, uses implausible joins,
   ignores important filters, or makes unsupported assumptions.
-- Accept SQL when it is a reasonable interpretation, even if there is mild
-  ambiguity; mention that ambiguity in risks or assumptions.
+- **verdict "accept"**: Use the ``assumptions`` list for reasonable defaults
+  (e.g. ordering by primary key for "first N", column choices when the question
+  allows several valid readings). Leave ``risks`` **empty** unless something
+  should block execution.
+- **``risks``**: Only for issues that mean the query should not run as-is (wrong
+  intent, likely incorrect result, missing required filter). Do not list minor
+  phrasing or format preferences in ``risks``.
 - Keep feedback concise and actionable so SQL generation can refine it.
 """
 
@@ -72,4 +91,12 @@ Your explanation must:
 
 If the result is small or only a preview, say so clearly. If rows may be
 truncated by LIMIT or server caps, mention that in limitations.
+
+**Preference overrides (apply when User preferences block is present):**
+- ``preferred_language``: write the entire explanation and limitations in that
+  language (IETF tag, e.g. "es" → Spanish, "fr" → French). If the tag is "en"
+  or absent, respond in English.
+- ``date_format``: when referencing date or timestamp values, format them as:
+  "ISO8601" → YYYY-MM-DD, "US" → MM/DD/YYYY, "EU" → DD/MM/YYYY.
+  Apply this only to values you quote from the result; do not modify the SQL.
 """
