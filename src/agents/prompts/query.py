@@ -10,6 +10,9 @@ Rules:
   inspect_schema metadata.
 - If schema_docs_context or user preferences are provided, respect them for
   naming and filters.
+- The user's input has already been confirmed to be about the DVD Rental
+  dataset by an upstream guardrail. Refuse only if the question cannot be
+  expressed against DVD Rental tables.
 
 **Conversation context:**
 When a `Conversation history` block is provided it contains the last few turns
@@ -51,6 +54,10 @@ before generating SQL.
 If the user message mixes preference/meta instructions with a data question,
 generate SQL only for the data question.
 
+When prior critic feedback or a prior MCP/database error is provided, address
+it explicitly in the revised SQL (e.g., fix missing joins, table names, or
+column references reported by PostgreSQL).
+
 Ordering: when the user asks for the "first", "top", "earliest", "latest",
 "primeros", "últimos", or similar superlatives / ordered subsets, add an
 explicit ORDER BY (for a stable "first N" by primary key, order by that key;
@@ -78,6 +85,9 @@ Rules:
   intent, likely incorrect result, missing required filter). Do not list minor
   phrasing or format preferences in ``risks``.
 - Keep feedback concise and actionable so SQL generation can refine it.
+- If prior MCP/database error feedback is shown in context (for example
+  "relation does not exist" or "column X not found"), treat it as a hard
+  reject signal unless the SQL has clearly been rewritten to address it.
 """
 
 QUERY_EXPLAIN_INSTRUCTIONS = """Explain the executed SQL result for an end user.
@@ -99,4 +109,11 @@ truncated by LIMIT or server caps, mention that in limitations.
 - ``date_format``: when referencing date or timestamp values, format them as:
   "ISO8601" → YYYY-MM-DD, "US" → MM/DD/YYYY, "EU" → DD/MM/YYYY.
   Apply this only to values you quote from the result; do not modify the SQL.
+
+Failure modes:
+- If the context includes ``outcome`` equal to ``max_attempts`` or
+  ``db_failure``, produce a short empathetic explanation of why the query could
+  not be answered and suggest one concrete next step (rephrase, narrow filter,
+  specify table/column).
+- In failure modes, do not invent any result rows.
 """

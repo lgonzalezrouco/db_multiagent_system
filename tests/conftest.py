@@ -16,6 +16,7 @@ from langchain_core.messages import BaseMessage
 from pytest import Config
 
 from agents.prompts.schema import INSPECT_METADATA_SENTINEL
+from agents.schemas.guardrail_outputs import GuardrailOutput
 from agents.schemas.preferences_outputs import PreferencesInferenceOutput
 from agents.schemas.query_outputs import (
     QueryCritiqueOutput,
@@ -139,6 +140,12 @@ def _stub_create_chat_llm(
                 return PreferencesInferenceOutput.no_change(
                     "stub: no preference change detected",
                 )
+            if self.kind == "guardrail":
+                return GuardrailOutput(
+                    in_scope=True,
+                    reason="stub: in scope",
+                    canned_response="",
+                )
             raise NotImplementedError(self.kind)
 
     class _FakeChatLiteLLM:
@@ -151,6 +158,7 @@ def _stub_create_chat_llm(
                 "QueryCritiqueOutput": "critique",
                 "QueryExplanationOutput": "explain",
                 "PreferencesInferenceOutput": "preferences_infer",
+                "GuardrailOutput": "guardrail",
             }
             if name not in mapping:
                 raise NotImplementedError(name)

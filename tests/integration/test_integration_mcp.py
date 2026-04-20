@@ -93,14 +93,14 @@ async def test_query_pipeline_via_live_mcp_http(
         assert state.steps == [
             "memory_load_user",
             "query_load_context",
-            "preferences_infer",
+            "guardrail_node",
             "query_plan",
             "query_generate_sql",
             "query_enforce_limit",
             "query_critic",
             "query_execute",
             "query_explain",
-            "memory_update_session",
+            "persist_prefs_node",
         ]
     finally:
         server.should_exit = True

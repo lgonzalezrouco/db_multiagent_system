@@ -32,16 +32,7 @@ _PENDING_QUERY_INPUT = "_pending_graph_input"
 _PENDING_SCHEMA_RUN = "_pending_schema_run"
 
 _SCHEMA_HITL_KEY = "_schema_hitl"
-_PREFS_HITL_KEY = "_prefs_hitl"
 _NAV_AGENT_KEY = "agent_tab"
-
-_PREF_LABELS: dict[str, str] = {
-    "preferred_language": "Preferred language (IETF tag, e.g. en, es, fr)",
-    "output_format": "Output format (table | json)",
-    "date_format": "Date format (ISO8601 | US | EU)",
-    "safety_strictness": "Safety strictness (strict | normal | lenient)",
-    "row_limit_hint": "Row limit hint (1–500)",
-}
 
 
 def _query_graph_app() -> Any:
@@ -103,24 +94,20 @@ async def _run_until_interrupt_or_done_query(
         _end_on_exit=False,
     ) as run_tree:
         out = await app.ainvoke(initial, config=config, version="v2")
-    while True:
-        state, interrupts = unwrap_query_graph_v2(out)
-        if not interrupts:
-            _close_run(run_tree, outputs={"steps": state.steps})
-            return state, None
-        intr = interrupts[0]
-        payload = getattr(intr, "value", intr)
-        if not isinstance(payload, dict):
-            msg = f"unexpected interrupt payload: {type(payload).__name__}"
-            _close_run(run_tree, error=msg)
-            raise TypeError(msg)
-        kind = payload.get("kind")
-        if kind not in {"preferences_review"}:
-            msg = f"unhandled interrupt: {payload!r}"
+        while True:
+            state, interrupts = unwrap_query_graph_v2(out)
+            if not interrupts:
+                _close_run(run_tree, outputs={"steps": state.steps})
+                return state, None
+            intr = interrupts[0]
+            payload = getattr(intr, "value", intr)
+            if not isinstance(payload, dict):
+                msg = f"unexpected interrupt payload: {type(payload).__name__}"
+                _close_run(run_tree, error=msg)
+                raise TypeError(msg)
+            msg = f"unexpected query interrupt: {payload!r}"
             _close_run(run_tree, error=msg)
             raise RuntimeError(msg)
-        pending = {"config": config, "payload": payload, "run_tree": run_tree}
-        return state, pending
 
 
 async def _run_until_interrupt_or_done_schema(
@@ -137,60 +124,24 @@ async def _run_until_interrupt_or_done_schema(
         _end_on_exit=False,
     ) as run_tree:
         out = await app.ainvoke(initial, config=config, version="v2")
-    while True:
-        state, interrupts = unwrap_schema_graph_v2(out)
-        if not interrupts:
-            _close_run(run_tree, outputs={"steps": state.steps})
-            return state, None
-        intr = interrupts[0]
-        payload = getattr(intr, "value", intr)
-        if not isinstance(payload, dict):
-            msg = f"unexpected interrupt payload: {type(payload).__name__}"
-            _close_run(run_tree, error=msg)
-            raise TypeError(msg)
-        kind = payload.get("kind")
-        if kind != "schema_review":
-            msg = f"unhandled interrupt: {payload!r}"
-            _close_run(run_tree, error=msg)
-            raise RuntimeError(msg)
-        pending = {"config": config, "payload": payload, "run_tree": run_tree}
-        return state, pending
-
-
-async def _consume_resume_query(
-    app: Any,
-    config: RunnableConfig,
-    resume: dict[str, Any],
-    *,
-    run_tree: Any = None,
-) -> Any:
-    ctx = (
-        tracing_context(parent=run_tree)
-        if run_tree is not None
-        else contextlib.nullcontext()
-    )
-    with ctx:
-        out = await app.ainvoke(Command(resume=resume), config=config, version="v2")
-    while True:
-        state, interrupts = unwrap_query_graph_v2(out)
-        if not interrupts:
-            st.session_state.pop(_PREFS_HITL_KEY, None)
-            _close_run(run_tree, outputs={"steps": state.steps})
-            return state
-        intr = interrupts[0]
-        payload = getattr(intr, "value", intr)
-        if not isinstance(payload, dict):
-            msg = f"unexpected interrupt payload: {type(payload).__name__}"
-            raise TypeError(msg)
-        kind = payload.get("kind")
-        if kind == "preferences_review":
-            st.session_state[_PREFS_HITL_KEY] = {
-                "config": config,
-                "payload": payload,
-                "run_tree": run_tree,
-            }
-            return state
-        raise RuntimeError(f"unhandled interrupt: {payload!r}")
+        while True:
+            state, interrupts = unwrap_schema_graph_v2(out)
+            if not interrupts:
+                _close_run(run_tree, outputs={"steps": state.steps})
+                return state, None
+            intr = interrupts[0]
+            payload = getattr(intr, "value", intr)
+            if not isinstance(payload, dict):
+                msg = f"unexpected interrupt payload: {type(payload).__name__}"
+                _close_run(run_tree, error=msg)
+                raise TypeError(msg)
+            kind = payload.get("kind")
+            if kind != "schema_review":
+                msg = f"unhandled interrupt: {payload!r}"
+                _close_run(run_tree, error=msg)
+                raise RuntimeError(msg)
+            pending = {"config": config, "payload": payload, "run_tree": run_tree}
+            return state, pending
 
 
 async def _consume_resume_schema(
@@ -241,7 +192,7 @@ async def _run_user_turn_query(app: Any, user_text: str, thread_id: str) -> Any:
     }
     state, pending = await _run_until_interrupt_or_done_query(app, initial, config)
     if pending is not None:
-        st.session_state[_PREFS_HITL_KEY] = pending
+        raise RuntimeError("query graph returned unexpected pending interrupt")
     return state
 
 
@@ -280,7 +231,6 @@ async def main() -> None:
     if st.sidebar.button("New query chat"):
         st.session_state.thread_id = str(uuid.uuid4())
         st.session_state.messages = []
-        st.session_state.pop(_PREFS_HITL_KEY, None)
         st.session_state.pop(_PENDING_QUERY_INPUT, None)
 
     if st.sidebar.button("New schema session"):
@@ -400,63 +350,13 @@ async def _render_query_tab(presence: Any) -> None:
         return
 
     app = _query_graph_app()
-    prefs_hitl = st.session_state.get(_PREFS_HITL_KEY)
 
     for role, content in st.session_state.messages:
         with st.chat_message(role):
             st.markdown(content)
 
-    if prefs_hitl:
-        st.info(
-            "The assistant detected a preference change — review and approve below."
-        )
-        payload = prefs_hitl["payload"]
-        config = prefs_hitl["config"]
-        current: dict = payload.get("current") or {}
-        proposed: dict = payload.get("proposed_delta") or {}
-        rationale: str = payload.get("rationale") or ""
-
-        with st.expander("Preference change review", expanded=True):
-            if rationale:
-                st.caption(f"**Why:** {rationale}")
-
-            st.write("**Proposed changes:**")
-            for k, v in proposed.items():
-                label = _PREF_LABELS.get(k, k)
-                old = current.get(k, "_(not set)_")
-                st.write(f"- **{label}**: `{old}` → `{v}`")
-
-            st.write("**Edit before approving** (optional):")
-            edited: dict[str, Any] = {}
-            for k, v in proposed.items():
-                label = _PREF_LABELS.get(k, k)
-                edited[k] = st.text_input(label, value=str(v), key=f"prefs_edit_{k}")
-
-            col_approve, col_reject = st.columns(2)
-            with col_approve:
-                approve = st.button("Approve", type="primary", key="prefs_hitl_approve")
-            with col_reject:
-                reject = st.button("Reject (no change)", key="prefs_hitl_reject")
-
-            if approve or reject:
-                resume_delta = edited if approve else "reject"
-                _run_tree = prefs_hitl.get("run_tree")
-                try:
-                    state = await _consume_resume_query(
-                        app, config, resume_delta, run_tree=_run_tree
-                    )
-                    st.session_state.pop(_PREFS_HITL_KEY, None)
-                    st.session_state.messages.append(
-                        ("assistant", format_turn_state(state)),
-                    )
-                    st.rerun()
-                except (RuntimeError, TypeError) as exc:
-                    if _run_tree:
-                        _close_run(_run_tree, error=str(exc))
-                    st.error(str(exc))
-
     pending_text = st.session_state.get(_PENDING_QUERY_INPUT)
-    if pending_text is not None and not prefs_hitl:
+    if pending_text is not None:
         try:
             with st.spinner("Running agents…"):
                 final_state = await _run_user_turn_query(
@@ -464,17 +364,16 @@ async def _render_query_tab(presence: Any) -> None:
                     pending_text,
                     st.session_state.thread_id,
                 )
-            if not st.session_state.get(_PREFS_HITL_KEY):
-                st.session_state.messages.append(
-                    ("assistant", format_turn_state(final_state)),
-                )
+            st.session_state.messages.append(
+                ("assistant", format_turn_state(final_state)),
+            )
         except (RuntimeError, TypeError) as exc:
             st.session_state.messages.append(("assistant", f"**Error:** {exc}"))
         finally:
             st.session_state.pop(_PENDING_QUERY_INPUT, None)
         st.rerun()
 
-    prompt = None if prefs_hitl else st.chat_input("Ask about the DVD Rental database")
+    prompt = st.chat_input("Ask about the DVD Rental database")
 
     if prompt:
         st.session_state.messages.append(("user", prompt))

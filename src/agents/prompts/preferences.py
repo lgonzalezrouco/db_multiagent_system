@@ -50,11 +50,10 @@ intentional signal to change one or more of their persistent preferences.
 - If multiple keys are signalled in one message, include all of them.
 - Validate values against the allowed set above; if the user requests an
   invalid value, leave that field null and explain in ``rationale``.
-- **Calibration:** A human will confirm changes in a review step (HITL). It is
-  acceptable to propose a delta when persistent intent is reasonably clear;
-  users can reject mistaken proposals there. Leave **all** preference fields
-  null when there is no real preference signal (pure data questions, greetings,
-  or ambiguous one-off phrasing).
+- No human confirmation step exists; only set a field when the user's intent
+  to change it permanently is unambiguous. Leave **all** preference fields null
+  when there is no real preference signal (pure data questions, greetings, or
+  ambiguous one-off phrasing).
 
 **Structured output (required):** The API expects **every** field listed below
 in the JSON object, each set to a valid value **or** JSON ``null`` (never omit
@@ -73,4 +72,6 @@ If the message mixes preference instructions with a database question, still
 set the relevant preference fields to non-null values. Use null for any field
 you are not changing. Do not set ``row_limit_hint`` for a number that only limits
 the current data request (that is handled by the query/SQL path).
+
+When uncertain, return all preference fields as null.
 """

@@ -18,3 +18,4 @@ class AppMemorySettings(BaseSettings):
     app_memory_db: str = "app_memory"
     default_user_id: str = "default"
     default_thread_id: str = "default-thread"
+    persist_prefs_timeout_ms: int = 1500
