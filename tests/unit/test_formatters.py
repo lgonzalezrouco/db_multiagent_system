@@ -8,6 +8,7 @@ from graph.state import QueryGraphState
 from ui.formatters import (
     default_schema_edit_json,
     format_query_answer_markdown,
+    format_query_execute_preview_markdown,
     format_schema_persist_markdown,
     format_turn_state,
     schema_resume_from_inputs,
@@ -54,6 +55,31 @@ def test_format_query_answer_markdown_default_shows_100_rows_without_note() -> N
     md = format_query_answer_markdown(result)
     assert "Showing first" not in md
     assert "| 99 |" in md
+
+
+def test_format_query_execute_preview_markdown_shows_partial_header() -> None:
+    """Execute preview renders partial header with SQL and rows."""
+    md = format_query_execute_preview_markdown(
+        sql="SELECT 1 AS n",
+        execution_result={
+            "success": True,
+            "columns": ["n"],
+            "rows": [{"n": 1}],
+        },
+    )
+    assert md is not None
+    assert "Partial result" in md
+    assert "SELECT 1 AS n" in md
+    assert "| n |" in md
+
+
+def test_format_query_execute_preview_markdown_none_for_failure() -> None:
+    """Execute preview is omitted when execution result failed."""
+    md = format_query_execute_preview_markdown(
+        sql="SELECT 1 AS n",
+        execution_result={"success": False},
+    )
+    assert md is None
 
 
 def test_format_turn_state_displays_error_when_present() -> None:

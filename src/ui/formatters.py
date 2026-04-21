@@ -81,6 +81,29 @@ def format_query_answer_markdown(
     return "\n\n".join(parts)
 
 
+def format_query_execute_preview_markdown(
+    *,
+    sql: str,
+    execution_result: dict[str, Any] | None,
+    max_rows: int = _QUERY_ANSWER_DISPLAY_ROW_CAP,
+) -> str | None:
+    """Render an early result preview from ``query_execute`` output.
+
+    Returns ``None`` when execution did not succeed or payload is invalid.
+    """
+    if not isinstance(execution_result, dict):
+        return None
+    if execution_result.get("success") is not True:
+        return None
+    payload: dict[str, Any] = {
+        "sql": sql,
+        "columns": list(execution_result.get("columns") or []),
+        "rows": list(execution_result.get("rows") or []),
+    }
+    body = format_query_answer_markdown(payload, max_rows=max_rows)
+    return "**Partial result (before explanation)**\n\n" + body
+
+
 def format_schema_persist_markdown(payload: dict[str, Any]) -> str:
     """Render a ``schema_persist`` result for chat (success or structured failure)."""
     if payload.get("success") is True:

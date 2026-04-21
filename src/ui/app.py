@@ -21,8 +21,10 @@ from graph import (
     graph_run_config,
 )
 from graph.invoke_v2 import unwrap_query_graph_v2, unwrap_schema_graph_v2
+from graph.state import QueryGraphState
 from ui.formatters import (
     default_schema_edit_json,
+    format_query_execute_preview_markdown,
     format_schema_turn_state,
     format_turn_state,
     schema_resume_from_inputs,
@@ -196,6 +198,88 @@ async def _run_user_turn_query(app: Any, user_text: str, thread_id: str) -> Any:
     return state
 
 
+async def _run_user_turn_query_streaming(
+    app: Any,
+    user_text: str,
+    thread_id: str,
+    on_preview: Any,
+) -> Any:
+    config, state_seed = graph_run_config(
+        thread_id=thread_id,
+        run_kind="streamlit",
+    )
+    initial: dict[str, Any] = {
+        "user_input": user_text,
+        "steps": [],
+        **state_seed,
+    }
+
+    async with ls_trace(
+        "agent_turn_query",
+        run_type="chain",
+        inputs={"user_input": initial.get("user_input", "")},
+        tags=config.get("tags") or [],
+        metadata=config.get("metadata") or {},
+        _end_on_exit=False,
+    ) as run_tree:
+        final_state: Any = None
+        latest_sql = ""
+        try:
+            async for chunk in app.astream(
+                initial,
+                config=config,
+                stream_mode="updates",
+                version="v2",
+            ):
+                if not isinstance(chunk, dict) or chunk.get("type") != "updates":
+                    continue
+                data = chunk.get("data")
+                if not isinstance(data, dict):
+                    continue
+                for node_name, update in data.items():
+                    if not isinstance(update, dict):
+                        continue
+                    q_any = update.get("query")
+                    if isinstance(q_any, dict) and isinstance(
+                        q_any.get("generated_sql"), str
+                    ):
+                        latest_sql = str(q_any.get("generated_sql") or "")
+                    if node_name != "query_execute":
+                        continue
+                    q = q_any if isinstance(q_any, dict) else {}
+                    exec_payload = (
+                        q.get("execution_result") if isinstance(q, dict) else None
+                    )
+                    sql = (
+                        str(q.get("generated_sql") or "")
+                        if isinstance(q, dict) and q.get("generated_sql")
+                        else latest_sql
+                    )
+                    preview = format_query_execute_preview_markdown(
+                        sql=sql,
+                        execution_result=exec_payload,
+                    )
+                    if preview:
+                        on_preview(preview)
+
+            final_snapshot = await app.aget_state(config=config)
+            state_values = final_snapshot.values
+            if isinstance(state_values, QueryGraphState):
+                final_state = state_values
+            elif isinstance(state_values, dict):
+                final_state = QueryGraphState(**state_values)
+            else:
+                msg = f"unexpected state type: {type(state_values).__name__}"
+                _close_run(run_tree, error=msg)
+                raise TypeError(msg)
+
+            _close_run(run_tree, outputs={"steps": final_state.steps})
+            return final_state
+        except Exception as exc:
+            _close_run(run_tree, error=str(exc))
+            raise
+
+
 async def _run_schema_start(app: Any, thread_id: str) -> Any:
     config, state_seed = graph_run_config(
         thread_id=thread_id,
@@ -358,15 +442,18 @@ async def _render_query_tab(presence: Any) -> None:
     pending_text = st.session_state.get(_PENDING_QUERY_INPUT)
     if pending_text is not None:
         try:
-            with st.spinner("Running agents…"):
-                final_state = await _run_user_turn_query(
-                    app,
-                    pending_text,
-                    st.session_state.thread_id,
-                )
-            st.session_state.messages.append(
-                ("assistant", format_turn_state(final_state)),
-            )
+            with st.chat_message("assistant"):
+                placeholder = st.empty()
+                with st.spinner("Running agents…"):
+                    final_state = await _run_user_turn_query_streaming(
+                        app,
+                        pending_text,
+                        st.session_state.thread_id,
+                        on_preview=placeholder.markdown,
+                    )
+                    final_text = format_turn_state(final_state)
+                    placeholder.markdown(final_text)
+            st.session_state.messages.append(("assistant", final_text))
         except (RuntimeError, TypeError) as exc:
             st.session_state.messages.append(("assistant", f"**Error:** {exc}"))
         finally:
