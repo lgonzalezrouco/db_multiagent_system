@@ -9,6 +9,7 @@ from unittest.mock import MagicMock
 import pytest
 
 from graph.nodes.query_nodes.query_critic import (
+    MAX_ATTEMPTS_MSG,
     _apply_strictness,
     _normalize_safety_strictness,
     query_critic,
@@ -222,3 +223,16 @@ async def test_critic_node_normal_reject_increments_refinement(
     result = await query_critic(_make_state(strictness="normal", refinement_count=1))
     assert result["query"]["critic_status"] == "reject"
     assert result["query"]["refinement_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_cap_reached_sets_outcome_max_attempts_and_last_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("QUERY_MAX_REFINEMENTS", "2")
+    monkeypatch.setattr(
+        _critic_mod, "build_query_critique", _mock_critique("reject", [])
+    )
+    result = await query_critic(_make_state(strictness="normal", refinement_count=1))
+    assert result["query"]["outcome"] == "max_attempts"
+    assert result["last_error"] == MAX_ATTEMPTS_MSG

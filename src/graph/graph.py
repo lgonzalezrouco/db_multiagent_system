@@ -10,11 +10,11 @@ from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from config.memory_settings import AppMemorySettings
-from graph.memory_nodes import memory_load_user, memory_update_session
+from graph.memory_nodes import memory_load_user
 from graph.nodes.query_nodes import (
-    preferences_hitl,
-    preferences_infer,
-    preferences_persist,
+    guardrail_node,
+    off_topic_node,
+    persist_prefs_node,
     query_critic,
     query_enforce_limit,
     query_execute,
@@ -22,10 +22,9 @@ from graph.nodes.query_nodes import (
     query_generate_sql,
     query_load_context,
     query_plan,
-    query_refine_cap,
     route_after_critic,
-    route_after_preferences_hitl,
-    route_after_preferences_infer,
+    route_after_execute,
+    route_after_guardrail,
 )
 from graph.nodes.schema_nodes import (
     route_after_schema_hitl,
@@ -133,37 +132,30 @@ def build_schema_graph() -> StateGraph:
 
 
 def build_query_graph() -> StateGraph:
-    """Query agent: memory → preferences → plan → SQL → critic → execute → explain."""
+    """Query agent: memory → guardrail → plan → SQL/critic/execute loops → explain."""
     workflow: StateGraph = StateGraph(QueryGraphState)
 
     workflow.add_node("memory_load_user", memory_load_user)
     workflow.add_node("query_load_context", query_load_context)
-    workflow.add_node("preferences_infer", preferences_infer)
-    workflow.add_node("preferences_hitl", preferences_hitl)
-    workflow.add_node("preferences_persist", preferences_persist)
+    workflow.add_node("guardrail_node", guardrail_node)
+    workflow.add_node("off_topic_node", off_topic_node)
     workflow.add_node("query_plan", query_plan)
     workflow.add_node("query_generate_sql", query_generate_sql)
     workflow.add_node("query_enforce_limit", query_enforce_limit)
     workflow.add_node("query_critic", query_critic)
     workflow.add_node("query_execute", query_execute)
     workflow.add_node("query_explain", query_explain)
-    workflow.add_node("query_refine_cap", query_refine_cap)
-    workflow.add_node("memory_update_session", memory_update_session)
+    workflow.add_node("persist_prefs_node", persist_prefs_node)
 
     workflow.add_edge(START, "memory_load_user")
     workflow.add_edge("memory_load_user", "query_load_context")
-    workflow.add_edge("query_load_context", "preferences_infer")
+    workflow.add_edge("query_load_context", "guardrail_node")
     workflow.add_conditional_edges(
-        "preferences_infer",
-        route_after_preferences_infer,
-        {"preferences_hitl": "preferences_hitl", "query_plan": "query_plan"},
+        "guardrail_node",
+        route_after_guardrail,
+        {"planner": "query_plan", "off_topic": "off_topic_node"},
     )
-    workflow.add_conditional_edges(
-        "preferences_hitl",
-        route_after_preferences_hitl,
-        {"preferences_persist": "preferences_persist", "query_plan": "query_plan"},
-    )
-    workflow.add_edge("preferences_persist", "query_plan")
+    workflow.add_edge("off_topic_node", "persist_prefs_node")
     workflow.add_edge("query_plan", "query_generate_sql")
     workflow.add_edge("query_generate_sql", "query_enforce_limit")
     workflow.add_edge("query_enforce_limit", "query_critic")
@@ -173,13 +165,16 @@ def build_query_graph() -> StateGraph:
         {
             "execute": "query_execute",
             "retry": "query_generate_sql",
-            "cap": "query_refine_cap",
+            "cap": "query_explain",
         },
     )
-    workflow.add_edge("query_execute", "query_explain")
-    workflow.add_edge("query_explain", "memory_update_session")
-    workflow.add_edge("query_refine_cap", "memory_update_session")
-    workflow.add_edge("memory_update_session", END)
+    workflow.add_conditional_edges(
+        "query_execute",
+        route_after_execute,
+        {"explain": "query_explain", "retry": "query_generate_sql"},
+    )
+    workflow.add_edge("query_explain", "persist_prefs_node")
+    workflow.add_edge("persist_prefs_node", END)
 
     return workflow
 

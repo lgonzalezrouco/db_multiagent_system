@@ -44,31 +44,53 @@ def seed_session_fields(state: QueryGraphState) -> dict[str, Any]:
     }
 
 
-def snapshot_session_fields(state: QueryGraphState) -> dict[str, Any]:
-    """Append a ConversationTurn after successful SQL execution; cap history FIFO."""
+def snapshot_session_fields(
+    state: QueryGraphState,
+    *,
+    include_failures: bool = False,
+) -> dict[str, Any]:
+    """Append a ConversationTurn and cap history FIFO.
+
+    By default only successful SQL execution is recorded. When
+    ``include_failures`` is true, failed/off-topic turns are also recorded with
+    ``row_count`` set to ``None`` and a fallback explanation.
+    """
     from graph.state import ConversationTurn
 
     sql = state.query.generated_sql
-    if not sql:
+    if not sql and not include_failures:
         return {}
 
-    if state.last_error:
+    if state.last_error and not include_failures:
         return {}
 
     execution_result = state.query.execution_result
-    if not isinstance(execution_result, dict) or not execution_result.get("success"):
+    success = isinstance(execution_result, dict) and execution_result.get("success")
+    if not success and not include_failures:
         return {}
 
-    row_count = execution_result.get("row_count") or execution_result.get(
-        "rows_returned"
-    )
+    row_count = None
+    rows_preview: list[dict[str, Any]] = []
+    if success and isinstance(execution_result, dict):
+        row_count = execution_result.get("row_count") or execution_result.get(
+            "rows_returned"
+        )
+        rows_preview = _trim_rows(execution_result)
+
+    explanation = state.query.explanation
+    if include_failures and not explanation:
+        explanation = (
+            state.query.guardrail_reason
+            or state.last_error
+            or "Turn ended without a successful query execution."
+        )
 
     turn = ConversationTurn(
         user_input=state.user_input or "",
         sql=sql,
         row_count=row_count,
-        rows_preview=_trim_rows(execution_result),
-        explanation=state.query.explanation,
+        rows_preview=rows_preview,
+        explanation=explanation,
     )
 
     current: list[ConversationTurn] = list(state.memory.conversation_history)

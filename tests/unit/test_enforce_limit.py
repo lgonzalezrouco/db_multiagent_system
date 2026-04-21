@@ -107,6 +107,26 @@ def test_enforce_limit_handles_cte() -> None:
     assert "LIMIT 10" in result.upper()
 
 
+def test_enforce_limit_handles_cte_outer_select() -> None:
+    sql = (
+        "WITH r AS (SELECT rental_id FROM rental) "
+        "SELECT rental_id FROM r ORDER BY rental_id"
+    )
+    result = enforce_limit(sql, 12)
+    assert "LIMIT 12" in result.upper()
+
+
+def test_enforce_limit_does_not_touch_inner_subquery_limit() -> None:
+    sql = (
+        "SELECT actor_id FROM ("
+        "SELECT actor_id FROM actor ORDER BY actor_id LIMIT 4"
+        ") s ORDER BY actor_id"
+    )
+    result = enforce_limit(sql, 9)
+    assert "LIMIT 9" in result.upper()
+    assert "LIMIT 4" in result.upper()
+
+
 def test_enforce_limit_fallback_appends_limit_on_parse_failure() -> None:
     # Deliberately broken SQL — sqlglot may partially parse it but we test
     # that some LIMIT appears and no exception is raised.

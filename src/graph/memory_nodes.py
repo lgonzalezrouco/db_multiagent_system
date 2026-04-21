@@ -11,7 +11,7 @@ from config.memory_settings import AppMemorySettings
 from graph.state import QueryGraphState
 from memory.preferences import UserPreferencesStore, default_preferences
 from memory.schema_docs import SchemaDocsStore
-from memory.session import seed_session_fields, snapshot_session_fields
+from memory.session import seed_session_fields
 
 logger = logging.getLogger(__name__)
 
@@ -64,29 +64,5 @@ async def memory_load_user(state: QueryGraphState) -> dict[str, Any]:
         if current_memory.get("warning") is None:
             out["memory"] = {**current_memory, "warning": warn}
         logger.warning(warn)
-
-    return out
-
-
-async def memory_update_session(state: QueryGraphState) -> dict[str, Any]:
-    """Snapshot session fields and persist dirty preferences to app_memory."""
-    settings = AppMemorySettings()
-    user_id = state.user_id or settings.default_user_id
-
-    session_delta = snapshot_session_fields(state)
-    out: dict[str, Any] = {"steps": ["memory_update_session"], **session_delta}
-
-    if state.memory.preferences_dirty:
-        prefs = state.memory.preferences or {}
-        try:
-            store = UserPreferencesStore(settings)
-            store.upsert(user_id, prefs)
-            existing = out.get("memory", {})
-            out["memory"] = {**existing, "preferences_dirty": False}
-        except psycopg.OperationalError:
-            warn = "could not persist preferences"
-            existing = out.get("memory", {})
-            out["memory"] = {**existing, "warning": warn}
-            logger.warning(warn)
 
     return out

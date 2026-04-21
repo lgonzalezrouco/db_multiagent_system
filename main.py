@@ -10,7 +10,6 @@ import sys
 from typing import Any
 
 import psycopg
-from langgraph.types import Command
 from pydantic import ValidationError
 
 from config import PostgresSettings
@@ -90,6 +89,15 @@ def _print_outcome(state: QueryGraphState) -> None:
     if isinstance(lr, dict) and lr.get("kind") == "query_answer":
         _print_query_answer(lr)
         return
+    if isinstance(lr, dict) and lr.get("kind") == "off_topic":
+        print(f"\n{lr.get('message', '')}\n")
+        return
+    if isinstance(lr, dict) and lr.get("kind") == "query_failure":
+        print(f"\n{lr.get('explanation') or 'The query could not be completed.'}\n")
+        reason = lr.get("reason")
+        if reason:
+            print(f"Reason: {reason}")
+        return
     print(json.dumps(lr, indent=2, ensure_ascii=False, default=str))
     print()
 
@@ -101,49 +109,14 @@ def _stdin_question() -> str | None:
     return text or None
 
 
-async def _prompt_preferences_resume(interrupt_payload: dict[str, Any]) -> Any:
-    print("\n--- Preference change review ---\n")
-    print(json.dumps(interrupt_payload, indent=2, ensure_ascii=False, default=str))
-    print("\nType 'approve' to apply proposed edits, or 'reject' to skip.")
-
-    def _read() -> str:
-        return input("prefs> ").strip()
-
-    line = await asyncio.to_thread(_read)
-    if line.lower() == "reject":
-        return "reject"
-    if line.lower() == "approve":
-        proposed = interrupt_payload.get("proposed_delta") or {}
-        return {k: str(v) for k, v in proposed.items()}
-    try:
-        return json.loads(line)
-    except json.JSONDecodeError as exc:
-        raise SystemExit(f"invalid JSON for resume: {exc}") from exc
-
-
-async def _run_turn_with_hitl(
+async def _run_turn(
     app: Any,
     input_arg: dict[str, Any],
     config: dict[str, Any],
 ) -> QueryGraphState:
     out = await app.ainvoke(input_arg, config=config, version="v2")
-    while True:
-        state, interrupts = unwrap_query_graph_v2(out)
-        if not interrupts:
-            return state
-        intr = interrupts[0]
-        payload = getattr(intr, "value", intr)
-        if not isinstance(payload, dict):
-            raise SystemExit(f"unexpected interrupt payload: {type(payload).__name__}")
-        if payload.get("kind") == "preferences_review":
-            resume = await _prompt_preferences_resume(payload)
-            out = await app.ainvoke(Command(resume=resume), config=config, version="v2")
-            continue
-        print(
-            f"\n(unhandled interrupt kind {payload!r}; stopping.)\n",
-            file=sys.stderr,
-        )
-        return state
+    state, _interrupts = unwrap_query_graph_v2(out)
+    return state
 
 
 async def _interactive_chat(
@@ -166,7 +139,7 @@ async def _interactive_chat(
             "steps": [],
             **state_seed,
         }
-        return await _run_turn_with_hitl(app, initial, cfg)
+        return await _run_turn(app, initial, cfg)
 
     if initial_question:
         state = await one_turn(initial_question)

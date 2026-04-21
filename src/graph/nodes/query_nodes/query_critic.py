@@ -10,6 +10,8 @@ from mcp_server.readonly_sql import sql_has_limit, validate_readonly_sql
 
 logger = logging.getLogger(__name__)
 
+MAX_ATTEMPTS_MSG = "Critic rejected SQL after max refinement attempts."
+
 
 def query_max_refinements() -> int:
     raw = os.environ.get("QUERY_MAX_REFINEMENTS", "3").strip()
@@ -133,17 +135,37 @@ async def query_critic(state: QueryGraphState) -> dict[str, Any]:
     sql_text = sql_text if isinstance(sql_text, str) else None
 
     ok, feedback = validate_sql_for_execution(sql_text)
+    max_r = query_max_refinements()
+
+    def _reject_update(next_count: int, reason: str) -> dict[str, Any]:
+        if next_count >= max_r:
+            logger.warning(
+                "validator_max_attempts",
+                extra={
+                    "graph_node": "query_critic",
+                    "refinement_count": next_count,
+                },
+            )
+            return {
+                "critic_status": "reject",
+                "critic_feedback": reason,
+                "refinement_count": next_count,
+                "outcome": "max_attempts",
+            }
+        return {
+            "critic_status": "reject",
+            "critic_feedback": reason,
+            "refinement_count": next_count,
+        }
+
     if not ok:
         logger.warning("SQL validation failed (critic reject): %s", feedback)
         rc = int(state.query.refinement_count or 0) + 1
-        return {
-            "steps": ["query_critic"],
-            "query": {
-                "critic_status": "reject",
-                "critic_feedback": feedback,
-                "refinement_count": rc,
-            },
-        }
+        update = _reject_update(rc, feedback)
+        out: dict[str, Any] = {"steps": ["query_critic"], "query": update}
+        if update.get("outcome") == "max_attempts":
+            out["last_error"] = MAX_ATTEMPTS_MSG
+        return out
 
     prefs = state.memory.preferences
     query_plan = state.query.plan if isinstance(state.query.plan, dict) else None
@@ -179,10 +201,17 @@ async def query_critic(state: QueryGraphState) -> dict[str, Any]:
     query_update = _apply_strictness(verdict, critique, strictness, rc)
 
     if query_update.get("critic_status") == "reject":
+        next_count = int(query_update.get("refinement_count", rc))
+        query_update = _reject_update(
+            next_count,
+            str(query_update.get("critic_feedback") or "Semantic critic rejected SQL."),
+        )
         logger.warning(
             "Semantic SQL critic rejected (strictness=%s): %s",
             strictness,
             query_update.get("critic_feedback"),
         )
-
-    return {"steps": ["query_critic"], "query": query_update}
+    out = {"steps": ["query_critic"], "query": query_update}
+    if query_update.get("outcome") == "max_attempts":
+        out["last_error"] = MAX_ATTEMPTS_MSG
+    return out

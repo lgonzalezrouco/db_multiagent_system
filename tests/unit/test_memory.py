@@ -5,7 +5,7 @@ from __future__ import annotations
 import psycopg
 import pytest
 
-from graph.memory_nodes import memory_load_user, memory_update_session
+from graph.memory_nodes import memory_load_user
 from graph.presence import DbSchemaPresence, SchemaPresenceResult
 from graph.state import (
     ConversationTurn,
@@ -491,83 +491,6 @@ async def test_memory_load_user_soft_fails_on_both_db_errors(
     assert result["memory"]["preferences"] == default_preferences()
     assert result["memory"].get("warning") is not None
     assert result["query"].get("docs_warning") is not None
-
-
-@pytest.mark.asyncio
-async def test_memory_update_session_snapshots_fields(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Session update snapshots SQL into conversation history."""
-    state = QueryGraphState(
-        user_input="list films",
-        query=QueryPipelineState(
-            generated_sql="SELECT * FROM film LIMIT 5",
-            execution_result={"success": True, "rows_returned": 2},
-            explanation="Found films.",
-        ),
-    )
-
-    result = await memory_update_session(state)
-
-    assert "memory_update_session" in result["steps"]
-    history = result["memory"]["conversation_history"]
-    assert len(history) == 1
-    assert history[0].user_input == "list films"
-    assert history[0].sql == "SELECT * FROM film LIMIT 5"
-
-
-@pytest.mark.asyncio
-async def test_memory_update_session_upserts_when_dirty(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Session update persists preferences when dirty flag is set."""
-    upserted: list[dict] = []
-
-    class _CapturingPrefsStore(_FakePrefsStore):
-        def upsert(self, user_id: str, prefs: dict) -> None:
-            upserted.append({"user_id": user_id, "prefs": prefs})
-            super().upsert(user_id, prefs)
-
-    monkeypatch.setattr(
-        "graph.memory_nodes.UserPreferencesStore",
-        lambda settings=None: _CapturingPrefsStore(),
-    )
-
-    state = QueryGraphState(
-        user_id="bob",
-        memory=MemoryState(
-            preferences={"preferred_language": "fr", "row_limit_hint": 20},
-            preferences_dirty=True,
-        ),
-    )
-
-    result = await memory_update_session(state)
-
-    assert len(upserted) == 1
-    assert upserted[0]["user_id"] == "bob"
-    assert upserted[0]["prefs"]["preferred_language"] == "fr"
-    assert result.get("memory", {}).get("preferences_dirty") is False
-
-
-@pytest.mark.asyncio
-async def test_memory_update_session_skips_upsert_on_db_error(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Session update handles DB errors gracefully."""
-    monkeypatch.setattr("graph.memory_nodes.UserPreferencesStore", _ErrorStore)
-
-    state = QueryGraphState(
-        user_id="carol",
-        memory=MemoryState(
-            preferences={"row_limit_hint": 5},
-            preferences_dirty=True,
-        ),
-    )
-
-    result = await memory_update_session(state)
-
-    assert result.get("memory", {}).get("warning") is not None
-    assert "could not persist" in result["memory"]["warning"]
 
 
 def test_append_steps_extends_list() -> None:

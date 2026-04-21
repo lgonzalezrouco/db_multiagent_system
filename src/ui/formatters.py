@@ -129,6 +129,27 @@ def _format_last_outputs(
     if isinstance(lr, dict) and lr.get("kind") == "query_answer":
         parts.append(format_query_answer_markdown(lr))
         return "\n\n".join(parts)
+    if isinstance(lr, dict) and lr.get("kind") == "off_topic":
+        message = str(lr.get("message") or "")
+        reason = str(lr.get("reason") or "")
+        if message:
+            parts.append(message)
+        if reason:
+            parts.append(f"_Reason: {reason}_")
+        return "\n\n".join(parts)
+    if isinstance(lr, dict) and lr.get("kind") == "query_failure":
+        expl = str(lr.get("explanation") or "")
+        reason = str(lr.get("reason") or "")
+        subtype = str(lr.get("subtype") or "")
+        if expl:
+            parts.append(f"**Could not complete the query**\n\n{expl}")
+        else:
+            parts.append("**Could not complete the query.**")
+        if reason:
+            parts.append(f"**Reason**\n\n{reason}")
+        if subtype:
+            parts.append(f"_Failure type: `{subtype}`_")
+        return "\n\n".join(parts)
     if isinstance(lr, dict) and lr.get("kind") == "schema_persist":
         parts.append(format_schema_persist_markdown(lr))
         return "\n\n".join(parts)

@@ -82,30 +82,63 @@ def _fallback_explanation(
 
 
 async def query_explain(state: QueryGraphState) -> dict[str, Any]:
-    err_early = state.last_error
+    outcome = state.query.outcome
+    if outcome == "off_topic":
+        return {"steps": ["query_explain"]}
+
     payload = state.query.execution_result
     sql = state.query.generated_sql or ""
+    if not isinstance(outcome, str) or not outcome:
+        if isinstance(payload, dict) and payload.get("success") is True:
+            outcome = "success"
+        else:
+            outcome = "db_failure"
 
-    if err_early:
+    if outcome in {"max_attempts", "db_failure"}:
+        reason = state.last_error or "Query could not be completed."
+        subtype = outcome
+        attempts = int(state.query.refinement_count or 0)
+        if isinstance(payload, dict) and isinstance(payload.get("error"), dict):
+            err = payload.get("error") or {}
+            if isinstance(err.get("message"), str) and err.get("message"):
+                reason = str(err.get("message"))
+
+        expl = "Sorry, I could not complete that query."
+        try:
+            llm_out = await build_query_explanation(
+                state.user_input or "",
+                sql,
+                query_execution_result=payload if isinstance(payload, dict) else {},
+                outcome=outcome,
+                schema_docs_warning=state.query.docs_warning,
+                query_plan=state.query.plan
+                if isinstance(state.query.plan, dict)
+                else None,
+                preferences=(
+                    state.memory.preferences
+                    if isinstance(state.memory.preferences, dict)
+                    else None
+                ),
+            )
+            if isinstance(llm_out, dict):
+                llm_expl = llm_out.get("explanation")
+                if isinstance(llm_expl, str) and llm_expl.strip():
+                    expl = llm_expl.strip()
+        except Exception:
+            logger.exception("failure_explanation_llm_failed")
+
         return {
             "steps": ["query_explain"],
-            "last_error": err_early,
-            "last_result": None,
-            "query": {"explanation": None},
-        }
-
-    if not isinstance(payload, dict) or not payload.get("success"):
-        msg = "Query execution did not return a successful result."
-        if isinstance(payload, dict):
-            err = payload.get("error")
-            if isinstance(err, dict) and err.get("message"):
-                msg = str(err["message"])
-        logger.warning("%s", msg)
-        return {
-            "steps": ["query_explain"],
-            "last_error": msg,
-            "last_result": None,
-            "query": {"explanation": None},
+            "query": {"explanation": expl, "outcome": outcome},
+            "last_result": {
+                "kind": "query_failure",
+                "subtype": subtype,
+                "reason": reason,
+                "sql": sql,
+                "attempts": attempts,
+                "explanation": expl,
+            },
+            "last_error": state.last_error,
         }
 
     columns = [str(c) for c in (payload.get("columns") or [])]
@@ -129,6 +162,7 @@ async def query_explain(state: QueryGraphState) -> dict[str, Any]:
             state.user_input or "",
             sql,
             query_execution_result=payload,
+            outcome="success",
             schema_docs_warning=str(warn) if warn else None,
             query_plan=qp,
             preferences=prefs if isinstance(prefs, dict) else None,
@@ -163,5 +197,5 @@ async def query_explain(state: QueryGraphState) -> dict[str, Any]:
         "steps": ["query_explain"],
         "last_result": last_result,
         "last_error": None,
-        "query": {"explanation": expl},
+        "query": {"explanation": expl, "outcome": "success"},
     }

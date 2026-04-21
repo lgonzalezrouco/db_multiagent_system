@@ -60,6 +60,9 @@ class QueryPipelineState(BaseModel):
 
     docs_context: dict | None = None
     docs_warning: str | None = None
+    topic_in_scope: bool | None = None
+    guardrail_reason: str | None = None
+    guardrail_canned_response: str | None = None
     plan: dict | None = None
     generated_sql: str | None = None
     critic_status: str | None = None
@@ -67,6 +70,7 @@ class QueryPipelineState(BaseModel):
     refinement_count: int = 0
     execution_result: dict | None = None
     explanation: str | None = None
+    outcome: str | None = None
 
 
 class ConversationTurn(BaseModel):
@@ -83,7 +87,6 @@ class MemoryState(BaseModel):
     """State owned by the memory/session layer."""
 
     preferences: dict | None = None
-    preferences_dirty: bool = False
     preferences_proposed_delta: dict | None = None
     preferences_rationale: str | None = None
     conversation_history: list[ConversationTurn] = Field(default_factory=list)
