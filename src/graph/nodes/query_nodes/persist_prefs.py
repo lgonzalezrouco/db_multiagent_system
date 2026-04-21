@@ -37,30 +37,42 @@ async def persist_prefs_node(state: QueryGraphState) -> dict[str, Any]:
 
     delta = state.memory.preferences_proposed_delta
     if delta:
+
+        def _on_bg_done(task: asyncio.Task) -> None:
+            try:
+                task.result()
+            except Exception:
+                logger.warning(
+                    "persist_prefs_background_failed",
+                    extra={"graph_node": "persist_prefs_node"},
+                    exc_info=True,
+                )
+
+        store = UserPreferencesStore(settings)
+        patch_task = asyncio.create_task(asyncio.to_thread(store.patch, user_id, delta))
         try:
-            store = UserPreferencesStore(settings)
-            patch_coro = asyncio.to_thread(store.patch, user_id, delta)
-            merged = await asyncio.wait_for(patch_coro, timeout=timeout_s)
-            memory_update["preferences"] = merged
-            memory_update["preferences_proposed_delta"] = None
-            memory_update["preferences_rationale"] = None
-            logger.info(
-                "persist_prefs_ok",
-                extra={
-                    "graph_node": "persist_prefs_node",
-                    "delta_keys": sorted(delta.keys()),
-                },
-            )
-        except TimeoutError:
-            warning = "persist scheduled in background"
-            bg = asyncio.to_thread(store.patch, user_id, delta)
-            asyncio.create_task(bg)
-            memory_update["preferences_proposed_delta"] = None
-            memory_update["preferences_rationale"] = None
-            logger.warning(
-                "persist_prefs_background",
-                extra={"graph_node": "persist_prefs_node"},
-            )
+            done, _pending = await asyncio.wait({patch_task}, timeout=timeout_s)
+            if patch_task not in done:
+                warning = "persist scheduled in background"
+                patch_task.add_done_callback(_on_bg_done)
+                memory_update["preferences_proposed_delta"] = None
+                memory_update["preferences_rationale"] = None
+                logger.warning(
+                    "persist_prefs_background",
+                    extra={"graph_node": "persist_prefs_node"},
+                )
+            else:
+                merged = patch_task.result()
+                memory_update["preferences"] = merged
+                memory_update["preferences_proposed_delta"] = None
+                memory_update["preferences_rationale"] = None
+                logger.info(
+                    "persist_prefs_ok",
+                    extra={
+                        "graph_node": "persist_prefs_node",
+                        "delta_keys": sorted(delta.keys()),
+                    },
+                )
         except Exception:
             warning = "could not persist preferences"
             memory_update["preferences_proposed_delta"] = None

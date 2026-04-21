@@ -62,6 +62,7 @@ class QueryPipelineState(BaseModel):
     docs_warning: str | None = None
     topic_in_scope: bool | None = None
     guardrail_reason: str | None = None
+    guardrail_canned_response: str | None = None
     plan: dict | None = None
     generated_sql: str | None = None
     critic_status: str | None = None

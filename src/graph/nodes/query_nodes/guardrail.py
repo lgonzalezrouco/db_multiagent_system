@@ -25,11 +25,13 @@ async def guardrail_node(state: QueryGraphState) -> dict[str, Any]:
 
     in_scope = bool(result.get("in_scope", True))
     reason = str(result.get("reason") or "").strip() or None
+    canned = str(result.get("canned_response") or "").strip() or None
 
     return {
         "steps": ["guardrail_node"],
         "query": {
             "topic_in_scope": in_scope,
             "guardrail_reason": reason,
+            "guardrail_canned_response": canned,
         },
     }

@@ -24,7 +24,9 @@ async def off_topic_node(state: QueryGraphState) -> dict[str, Any]:
         state.memory.preferences if isinstance(state.memory.preferences, dict) else {}
     )
     preferred_language = str(prefs.get("preferred_language") or "en")
-    canned = _fallback_off_topic(preferred_language)
+    canned = state.query.guardrail_canned_response or _fallback_off_topic(
+        preferred_language
+    )
 
     return {
         "steps": ["off_topic_node"],

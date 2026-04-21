@@ -101,3 +101,25 @@ async def test_persist_prefs_exception_does_not_set_last_error(
     result = await persist_prefs_node(state)
     assert "last_error" not in result or result.get("last_error") is None
     assert result["memory"]["warning"] == "could not persist preferences"
+
+
+@pytest.mark.asyncio
+async def test_persist_prefs_store_timeout_error_is_not_misclassified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _TimeoutStore:
+        def __init__(self, settings=None) -> None:
+            pass
+
+        def patch(self, user_id: str, delta: dict) -> dict:
+            raise TimeoutError("store timeout")
+
+    monkeypatch.setattr(
+        "graph.nodes.query_nodes.persist_prefs.UserPreferencesStore",
+        _TimeoutStore,
+    )
+    state = QueryGraphState(
+        memory=MemoryState(preferences_proposed_delta={"output_format": "json"}),
+    )
+    result = await persist_prefs_node(state)
+    assert result["memory"]["warning"] == "could not persist preferences"

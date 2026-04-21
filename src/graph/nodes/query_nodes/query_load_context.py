@@ -25,6 +25,7 @@ async def query_load_context(state: QueryGraphState) -> dict[str, Any]:
             "explanation": None,
             "topic_in_scope": None,
             "guardrail_reason": None,
+            "guardrail_canned_response": None,
             "outcome": None,
         },
         "last_error": None,

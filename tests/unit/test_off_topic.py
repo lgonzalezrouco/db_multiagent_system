@@ -27,3 +27,17 @@ async def test_off_topic_sets_outcome_and_clears_last_error() -> None:
     result = await off_topic_node(state)
     assert result["query"]["outcome"] == "off_topic"
     assert result["last_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_off_topic_uses_guardrail_canned_response_when_present() -> None:
+    state = QueryGraphState(
+        memory=MemoryState(preferences={"preferred_language": "es"}),
+        query=QueryPipelineState(
+            guardrail_reason="outside scope",
+            guardrail_canned_response="Use this custom refusal",
+        ),
+    )
+    result = await off_topic_node(state)
+    payload = result["last_result"]
+    assert payload["message"] == "Use this custom refusal"

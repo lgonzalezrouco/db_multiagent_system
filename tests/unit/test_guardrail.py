@@ -50,6 +50,28 @@ async def test_guardrail_rejects_weather_question(
 
 
 @pytest.mark.asyncio
+async def test_guardrail_keeps_canned_response_for_off_topic(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _fake_classify(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {
+            "in_scope": False,
+            "reason": "outside scope",
+            "canned_response": "Please ask about DVD Rental.",
+            "used_llm": True,
+        }
+
+    monkeypatch.setattr(
+        "graph.nodes.query_nodes.guardrail.classify_topic", _fake_classify
+    )
+    state = QueryGraphState(user_input="what is the weather?")
+    result = await guardrail_node(state)
+    assert (
+        result["query"]["guardrail_canned_response"] == "Please ask about DVD Rental."
+    )
+
+
+@pytest.mark.asyncio
 async def test_guardrail_fails_open_on_llm_error_sets_in_scope_true(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
