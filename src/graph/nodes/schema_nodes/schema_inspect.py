@@ -46,9 +46,7 @@ async def schema_inspect(state: SchemaGraphState) -> dict[str, Any]:
 
     try:
         settings = MCPSettings()
-        client = await mcp_helpers.get_mcp_client(settings)
-        tools = await client.get_tools()
-        inspect_tool = next((t for t in tools if t.name == "inspect_schema"), None)
+        inspect_tool = await mcp_helpers.get_mcp_tool(settings, name="inspect_schema")
         if inspect_tool is None:
             msg = "MCP tool inspect_schema not found"
             out["last_error"] = msg

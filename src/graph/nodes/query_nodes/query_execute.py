@@ -44,9 +44,9 @@ async def query_execute(state: QueryGraphState) -> dict[str, Any]:
 
     try:
         settings = MCPSettings()
-        client = await mcp_helpers.get_mcp_client(settings)
-        tools = await client.get_tools()
-        exec_tool = next((t for t in tools if t.name == "execute_readonly_sql"), None)
+        exec_tool = await mcp_helpers.get_mcp_tool(
+            settings, name="execute_readonly_sql"
+        )
         if exec_tool is None:
             _mark_db_failure("MCP tool execute_readonly_sql not found")
             logger.error("MCP tool execute_readonly_sql not found")
