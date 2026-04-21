@@ -3,7 +3,6 @@ in query_explain node and formatters."""
 
 from __future__ import annotations
 
-import importlib
 import json
 from datetime import date, datetime
 from typing import Any
@@ -18,8 +17,6 @@ from graph.nodes.query_nodes.query_explain import (
 )
 from graph.state import MemoryState, QueryGraphState, QueryPipelineState
 from ui.formatters import format_query_answer_markdown
-
-_explain_mod = importlib.import_module("graph.nodes.query_nodes.query_explain")
 
 
 def test_get_pref_returns_default_for_none() -> None:
@@ -207,51 +204,22 @@ def _make_state(
     )
 
 
-def _noop_llm_out() -> dict:
-    return {
-        "explanation": "stub",
-        "limitations": "stub",
-        "follow_up_suggestions": [],
-    }
-
-
 @pytest.mark.asyncio
-async def test_node_forwards_output_format_table(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        _explain_mod,
-        "build_query_explanation",
-        lambda *a, **k: _async({"explanation": "e", "limitations": "l"}),
-    )
+async def test_node_forwards_output_format_table() -> None:
     state = _make_state(prefs={"output_format": "table"})
     result = await query_explain(state)
     assert result["last_result"]["output_format"] == "table"
 
 
 @pytest.mark.asyncio
-async def test_node_forwards_output_format_json(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        _explain_mod,
-        "build_query_explanation",
-        lambda *a, **k: _async({"explanation": "e", "limitations": "l"}),
-    )
+async def test_node_forwards_output_format_json() -> None:
     state = _make_state(prefs={"output_format": "json"})
     result = await query_explain(state)
     assert result["last_result"]["output_format"] == "json"
 
 
 @pytest.mark.asyncio
-async def test_node_applies_date_format_us_to_rows(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        _explain_mod,
-        "build_query_explanation",
-        lambda *a, **k: _async({"explanation": "e", "limitations": "l"}),
-    )
+async def test_node_applies_date_format_us_to_rows() -> None:
     state = _make_state(
         prefs={"date_format": "US"},
         rows=[{"last_update": "2024-06-15", "name": "Alice"}],
@@ -263,14 +231,7 @@ async def test_node_applies_date_format_us_to_rows(
 
 
 @pytest.mark.asyncio
-async def test_node_iso_date_format_leaves_rows_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        _explain_mod,
-        "build_query_explanation",
-        lambda *a, **k: _async({"explanation": "e", "limitations": "l"}),
-    )
+async def test_node_iso_date_format_leaves_rows_unchanged() -> None:
     rows = [{"last_update": "2024-06-15"}]
     state = _make_state(prefs={"date_format": "ISO8601"}, rows=rows)
     result = await query_explain(state)
@@ -278,21 +239,7 @@ async def test_node_iso_date_format_leaves_rows_unchanged(
 
 
 @pytest.mark.asyncio
-async def test_node_defaults_output_format_to_table(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        _explain_mod,
-        "build_query_explanation",
-        lambda *a, **k: _async({"explanation": "e", "limitations": "l"}),
-    )
+async def test_node_defaults_output_format_to_table() -> None:
     state = _make_state(prefs={})
     result = await query_explain(state)
     assert result["last_result"]["output_format"] == "table"
-
-
-def _async(value: Any):
-    async def _inner(*args: Any, **kwargs: Any) -> Any:
-        return value
-
-    return _inner()

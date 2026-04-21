@@ -157,7 +157,9 @@ async def test_infer_sends_system_message() -> None:
         await infer_preferences_delta("anything")
     system_msgs = [m for m in captured if isinstance(m, SystemMessage)]
     assert len(system_msgs) == 1
-    assert "preferences" in system_msgs[0].content.lower()
+    sys_content = system_msgs[0].content
+    sys_text = sys_content if isinstance(sys_content, str) else str(sys_content)
+    assert "preferences" in sys_text.lower()
 
 
 @pytest.mark.asyncio

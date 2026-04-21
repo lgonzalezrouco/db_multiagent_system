@@ -6,7 +6,7 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
@@ -426,7 +426,7 @@ async def build_plan_and_preferences_delta(
     plan_out: dict[str, Any] = {}
     if isinstance(plan_res, Exception):
         logger.warning("planner_failed", exc_info=plan_res)
-    else:
+    elif isinstance(plan_res, dict):
         plan_out = plan_res
 
     prefs_delta: dict[str, Any] | None = None
@@ -435,8 +435,8 @@ async def build_plan_and_preferences_delta(
         logger.warning(
             "preferences_inference_failed_inside_planner", exc_info=prefs_res
         )
-    else:
-        prefs_delta = prefs_res.proposed_delta
+    elif isinstance(prefs_res, PreferencesInferenceOutput):
+        prefs_delta = cast(dict[str, Any] | None, prefs_res.proposed_delta)
         prefs_rationale = prefs_res.rationale
 
     return plan_out, prefs_delta, prefs_rationale

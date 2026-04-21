@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+from typing import Annotated, Any
 
 from pydantic import BaseModel, Field
 
@@ -68,7 +68,7 @@ class QueryPipelineState(BaseModel):
     critic_status: str | None = None
     critic_feedback: str | None = None
     refinement_count: int = 0
-    execution_result: dict | None = None
+    execution_result: dict[str, Any] | None = None
     explanation: str | None = None
     outcome: str | None = None
 

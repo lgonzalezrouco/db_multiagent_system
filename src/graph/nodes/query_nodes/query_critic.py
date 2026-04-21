@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from typing import Any, Literal
 
 from agents.query_agent import build_query_critique
@@ -76,6 +77,42 @@ def _semantic_feedback(payload: dict[str, Any] | None) -> str:
     parts = [feedback] if feedback else []
     parts.extend(extras)
     return " ".join(parts).strip() or "Semantic critic rejected the SQL."
+
+
+def _looks_complex_sql(sql: str) -> bool:
+    text = f" {sql.upper()} "
+    markers = (
+        " JOIN ",
+        " WITH ",
+        " GROUP BY ",
+        " HAVING ",
+        " OVER(",
+        " UNION ",
+        " INTERSECT ",
+        " EXCEPT ",
+        " DISTINCT ",
+        " EXISTS ",
+        " IN (SELECT",
+        " FROM (",
+    )
+    if any(m in text for m in markers):
+        return True
+    return bool(re.search(r"\(\s*SELECT\b", text))
+
+
+def should_run_semantic_critic(
+    *,
+    strictness: str,
+    refinement_count: int,
+    sql: str,
+) -> tuple[bool, str]:
+    if strictness == "strict":
+        return True, "strict_mode"
+    if refinement_count > 0:
+        return True, "retry"
+    if _looks_complex_sql(sql):
+        return True, "complex_sql"
+    return False, "simple_first_pass"
 
 
 def _apply_strictness(
@@ -168,6 +205,37 @@ async def query_critic(state: QueryGraphState) -> dict[str, Any]:
         return out
 
     prefs = state.memory.preferences
+    strictness = _normalize_safety_strictness(prefs)
+    rc = int(state.query.refinement_count or 0)
+    run_semantic, reason = should_run_semantic_critic(
+        strictness=strictness,
+        refinement_count=rc,
+        sql=sql_text or "",
+    )
+
+    if not run_semantic:
+        logger.info(
+            "critic_semantic_skipped",
+            extra={
+                "graph_node": "query_critic",
+                "strictness": strictness,
+                "reason": reason,
+            },
+        )
+        return {
+            "steps": ["query_critic"],
+            "query": {"critic_status": "accept", "critic_feedback": None},
+        }
+
+    logger.info(
+        "critic_semantic_invoked",
+        extra={
+            "graph_node": "query_critic",
+            "strictness": strictness,
+            "reason": reason,
+        },
+    )
+
     query_plan = state.query.plan if isinstance(state.query.plan, dict) else None
     schema_docs_context = (
         state.query.docs_context if isinstance(state.query.docs_context, dict) else None
@@ -195,9 +263,6 @@ async def query_critic(state: QueryGraphState) -> dict[str, Any]:
         }
 
     verdict = _normalize_critic_verdict(critique.get("verdict"))
-    strictness = _normalize_safety_strictness(prefs)
-    rc = int(state.query.refinement_count or 0)
-
     query_update = _apply_strictness(verdict, critique, strictness, rc)
 
     if query_update.get("critic_status") == "reject":

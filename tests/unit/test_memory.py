@@ -175,6 +175,7 @@ def test_upsert_full_replace_does_not_preserve_old_keys() -> None:
     # Full replace with a smaller dict (no row_limit_hint key)
     store.upsert("grace", {"preferred_language": "de"})
     row = db.get_row("grace")
+    assert row is not None
 
     # row_limit_hint was wiped (not in new dict)
     assert "row_limit_hint" not in row

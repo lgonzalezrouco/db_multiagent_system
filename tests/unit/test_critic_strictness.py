@@ -11,8 +11,10 @@ import pytest
 from graph.nodes.query_nodes.query_critic import (
     MAX_ATTEMPTS_MSG,
     _apply_strictness,
+    _looks_complex_sql,
     _normalize_safety_strictness,
     query_critic,
+    should_run_semantic_critic,
 )
 from graph.state import MemoryState, QueryGraphState, QueryPipelineState
 
@@ -178,6 +180,59 @@ def _mock_critique(verdict: str, risks: list[str]) -> MagicMock:
         return result
 
     return _fake
+
+
+def test_should_run_semantic_critic_in_strict_mode() -> None:
+    run, reason = should_run_semantic_critic(
+        strictness="strict",
+        refinement_count=0,
+        sql="SELECT actor_id FROM actor LIMIT 10",
+    )
+    assert run is True
+    assert reason == "strict_mode"
+
+
+def test_should_run_semantic_critic_on_retry() -> None:
+    run, reason = should_run_semantic_critic(
+        strictness="normal",
+        refinement_count=1,
+        sql="SELECT actor_id FROM actor LIMIT 10",
+    )
+    assert run is True
+    assert reason == "retry"
+
+
+def test_should_run_semantic_critic_on_complex_sql() -> None:
+    run, reason = should_run_semantic_critic(
+        strictness="normal",
+        refinement_count=0,
+        sql=(
+            "SELECT f.title FROM film f "
+            "JOIN inventory i ON i.film_id=f.film_id LIMIT 10"
+        ),
+    )
+    assert run is True
+    assert reason == "complex_sql"
+
+
+def test_should_skip_semantic_critic_on_simple_first_pass() -> None:
+    run, reason = should_run_semantic_critic(
+        strictness="normal",
+        refinement_count=0,
+        sql="SELECT actor_id FROM actor LIMIT 10",
+    )
+    assert run is False
+    assert reason == "simple_first_pass"
+
+
+def test_looks_complex_sql_detects_subquery() -> None:
+    assert (
+        _looks_complex_sql(
+            "SELECT * FROM actor "
+            "WHERE actor_id IN (SELECT actor_id FROM film_actor) LIMIT 10"
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio

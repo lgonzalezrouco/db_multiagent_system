@@ -5,7 +5,6 @@ import re
 from datetime import date, datetime
 from typing import Any
 
-from agents.query_agent import build_query_explanation
 from graph.state import QueryGraphState
 
 logger = logging.getLogger(__name__)
@@ -81,6 +80,18 @@ def _fallback_explanation(
     )
 
 
+def _deterministic_failure_explanation(
+    *, subtype: str, reason: str, attempts: int
+) -> str:
+    prefix = "Sorry, I could not complete that query."
+    if subtype == "max_attempts":
+        return (
+            f"{prefix} I retried {attempts} time(s) but validation/execution "
+            f"kept failing. Last issue: {reason}"
+        )
+    return f"{prefix} Database execution failed with: {reason}"
+
+
 async def query_explain(state: QueryGraphState) -> dict[str, Any]:
     outcome = state.query.outcome
     if outcome == "off_topic":
@@ -102,30 +113,11 @@ async def query_explain(state: QueryGraphState) -> dict[str, Any]:
             err = payload.get("error") or {}
             if isinstance(err.get("message"), str) and err.get("message"):
                 reason = str(err.get("message"))
-
-        expl = "Sorry, I could not complete that query."
-        try:
-            llm_out = await build_query_explanation(
-                state.user_input or "",
-                sql,
-                query_execution_result=payload if isinstance(payload, dict) else {},
-                outcome=outcome,
-                schema_docs_warning=state.query.docs_warning,
-                query_plan=state.query.plan
-                if isinstance(state.query.plan, dict)
-                else None,
-                preferences=(
-                    state.memory.preferences
-                    if isinstance(state.memory.preferences, dict)
-                    else None
-                ),
-            )
-            if isinstance(llm_out, dict):
-                llm_expl = llm_out.get("explanation")
-                if isinstance(llm_expl, str) and llm_expl.strip():
-                    expl = llm_expl.strip()
-        except Exception:
-            logger.exception("failure_explanation_llm_failed")
+        expl = _deterministic_failure_explanation(
+            subtype=subtype,
+            reason=reason,
+            attempts=attempts,
+        )
 
         return {
             "steps": ["query_explain"],
@@ -141,6 +133,7 @@ async def query_explain(state: QueryGraphState) -> dict[str, Any]:
             "last_error": state.last_error,
         }
 
+    assert payload is not None
     columns = [str(c) for c in (payload.get("columns") or [])]
     rows_raw = payload.get("rows") or []
     rows_out = _rows_to_dicts(columns, rows_raw)
@@ -155,33 +148,10 @@ async def query_explain(state: QueryGraphState) -> dict[str, Any]:
     limitations = _default_limitations(warn)
     expl = _fallback_explanation(state.user_input or "", payload, rows_formatted)
 
-    qp = state.query.plan if isinstance(state.query.plan, dict) else None
-
-    try:
-        llm_out = await build_query_explanation(
-            state.user_input or "",
-            sql,
-            query_execution_result=payload,
-            outcome="success",
-            schema_docs_warning=str(warn) if warn else None,
-            query_plan=qp,
-            preferences=prefs if isinstance(prefs, dict) else None,
-        )
-        if isinstance(llm_out, dict):
-            llm_expl = llm_out.get("explanation")
-            llm_limits = llm_out.get("limitations")
-            if isinstance(llm_expl, str) and llm_expl.strip():
-                expl = llm_expl.strip()
-            if isinstance(llm_limits, str) and llm_limits.strip():
-                merged_limitations = [limitations, llm_limits.strip()]
-                limitations = " ".join(
-                    part for part in merged_limitations if part.strip()
-                )
-    except Exception as exc:
-        logger.exception(
-            "Query explanation LLM call failed; using deterministic fallback: %s",
-            exc,
-        )
+    logger.info(
+        "query_explain_deterministic",
+        extra={"graph_node": "query_explain", "rows": len(rows_formatted)},
+    )
 
     last_result: dict[str, Any] = {
         "kind": "query_answer",
