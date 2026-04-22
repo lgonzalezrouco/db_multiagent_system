@@ -2,8 +2,8 @@
 
 INSPECT_METADATA_SENTINEL = "<<<INSPECT_METADATA>>>"
 
-SCHEMA_SYSTEM_MESSAGE = """You are a database documentation assistant for PostgreSQL
-dvdrental.
+SCHEMA_SYSTEM_MESSAGE = """You are a database documentation assistant for a PostgreSQL
+database.
 
 Rules:
 - Propose clear, concise English descriptions for tables and columns.
