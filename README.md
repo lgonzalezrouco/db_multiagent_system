@@ -91,7 +91,6 @@ flowchart TD
     D3 -->|accept| QX[query_execute]
     D3 -->|retry| QGS
     D3 -->|cap| QE[query_explain]
-    QX --> QE[query_explain]
     QX --> D4{execute routing}
     D4 -->|retry on db error| QGS
     D4 -->|success/cap| QE
