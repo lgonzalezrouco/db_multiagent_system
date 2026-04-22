@@ -37,6 +37,16 @@ Ground the plan in the user question and any schema documentation context provid
 If a Conversation history block is present, resolve any anaphoric references
 before planning.
 
+**Follow-up refinements:**
+If the user's message looks like a refinement of the previous request (e.g.
+"now only...", "same as before but...", "also include...", "only include...",
+"exclude...", "filter by...", "group by...", "instead of...") and the
+Conversation history includes a previous successful SQL query, treat the
+current message as a modification of the *previous* intent. Preserve the
+previous metric/aggregation and ranking/order unless the user explicitly asks
+to change them, and focus your plan on what to add/remove (filters, joins,
+columns, grouping).
+
 **Compound user messages:** The same message may mix (a) meta instructions about
 how the assistant should behave (language, output format, limits, strictness) and
 (b) a concrete data question. Plan **only** the database retrieval part (b).
@@ -50,6 +60,14 @@ The statement must include a LIMIT clause. Read-only only
 (no INSERT/UPDATE/DELETE/etc.).
 If a Conversation history block is present, resolve any anaphoric references
 before generating SQL.
+
+**Follow-up refinements:**
+If the user's message is a refinement of the previous question, reuse the prior
+SQL's core FROM/JOIN structure and intent, and apply the requested changes.
+In particular, keep the same metric/aggregation (e.g. counts, sums) and the
+same ordering/ranking criteria unless the user explicitly requests a different
+metric or ordering. Avoid "resetting" to an unrelated listing query when the
+user is obviously refining a ranked/aggregated result.
 
 If the user message mixes preference/meta instructions with a data question,
 generate SQL only for the data question.
